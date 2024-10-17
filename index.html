@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sheet Mapper</title>
+    <script src='https://api.mapbox.com/mapbox-gl-js/v2.9.1/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.9.1/mapbox-gl.css' rel='stylesheet' />
+    <script src='https://unpkg.com/papaparse@5.3.0/papaparse.min.js'></script>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        mapboxgl.accessToken = 'pk.eyJ1IjoicGxhbmVtYWQiLCJhIjoiY2x2MzZwbGRyMGdheDJtbXVwdDA4aDNyaCJ9.nbvz6aNGQo68xa4NtWH26A'; // Replace with your Mapbox access token
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/streets-v11',
+            center: [73.8567, 18.5204], // Center on India
+            zoom: 5,
+            hash: true
+        });
+
+        // Get the sheet ID from the URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const sheetId = urlParams.get('sheetId');
+
+        if (!sheetId) {
+            console.error('No sheet ID provided in URL parameters');
+        } else {
+             // eg. publicmap.github.io/sheet-mapper/?sheetId=1234567890
+            const sheetUrl = `https://docs.google.com/spreadsheets/d/e/${sheetId}/pub?single=true&output=csv`;
+
+            map.on('load', () => {
+                Papa.parse(sheetUrl, {
+                    download: true,
+                    header: true,
+                    complete: function(results) {
+                        const data = results.data.filter(row => row.Latitude && row.Longitude);
+                        
+                        const geojson = {
+                            type: 'FeatureCollection',
+                            features: data.map(row => ({
+                                type: 'Feature',
+                                geometry: {
+                                    type: 'Point',
+                                    coordinates: [parseFloat(row.Longitude), parseFloat(row.Latitude)]
+                                },
+                                properties: row
+                            }))
+                        };
+
+                        map.addSource('deals', {
+                            type: 'geojson',
+                            data: geojson
+                        });
+
+                        map.addLayer({
+                            id: 'deals',
+                            type: 'circle',
+                            source: 'deals',
+                            paint: {
+                                'circle-radius': 6,
+                                'circle-color': '#B42222',
+                                'circle-stroke-width': 1,
+                                'circle-stroke-color': '#ffffff'
+                            }
+                        });
+
+                        map.on('click', 'deals', (e) => {
+                            const coordinates = e.features[0].geometry.coordinates.slice();
+                            const properties = e.features[0].properties;
+
+                            let popupContent = '<table>';
+                            for (const [key, value] of Object.entries(properties)) {
+                                popupContent += `<tr><td><strong>${key}:</strong></td><td>${value}</td></tr>`;
+                            }
+                            popupContent += '</table>';
+
+                            new mapboxgl.Popup()
+                                .setLngLat(coordinates)
+                                .setHTML(popupContent)
+                                .addTo(map);
+                        });
+
+                        map.on('mouseenter', 'deals', () => {
+                            map.getCanvas().style.cursor = 'pointer';
+                        });
+
+                        map.on('mouseleave', 'deals', () => {
+                            map.getCanvas().style.cursor = '';
+                        });
+                    }
+                });
+            });
+        }
+    </script>
+</body>
+</html>
