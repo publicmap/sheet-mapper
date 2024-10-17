@@ -13,20 +13,13 @@
         body { margin: 0; padding: 0; }
         #map { position: absolute; top: 60px; bottom: 0; right: 0; left: 300px; }
         #sidebar { position: absolute; top: 60px; bottom: 0; left: 0; width: 300px; overflow-y: auto; background-color: white; padding: 10px; }
+        .sidebar-item:hover { background-color: #f0f0f0; cursor: pointer; }
     </style>
 </head>
 <body class="bg-gray-100">
     <div class="fixed top-0 left-0 right-0 z-10 bg-white shadow-md p-4">
-        <div class="container mx-auto flex space-x-4">
-            <select id="stageFilter" class="p-2 border rounded">
-                <option value="">All Stages</option>
-            </select>
-            <select id="categoryFilter" class="p-2 border rounded">
-                <option value="">All Categories</option>
-            </select>
-            <select id="amountTierFilter" class="p-2 border rounded">
-                <option value="">All Amount Tiers</option>
-            </select>
+        <div id="filterContainer" class="container mx-auto flex flex-wrap space-x-4">
+            <!-- Filters will be dynamically added here -->
         </div>
     </div>
     <div id="sidebar"></div>
@@ -97,7 +90,8 @@
                                     '#B42222'
                                 ],
                                 'circle-stroke-width': 1,
-                                'circle-stroke-color': '#ffffff'
+                                'circle-stroke-color': '#ffffff',
+                                'circle-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 1, 0.5]
                             }
                         });
 
@@ -108,26 +102,35 @@
 
                         function updateSidebar() {
                             const center = map.getCenter();
-                            const features = map.querySourceFeatures('deals');
+                            const features = map.queryRenderedFeatures({ layers: ['deals'] });
                             
                             // Calculate distances and sort
                             const sortedFeatures = features.map(f => ({
                                 ...f,
-                                distance: turf.distance(center, f.geometry.coordinates)
+                                distance: turf.distance(
+                                    turf.point([center.lng, center.lat]),
+                                    turf.point(f.geometry.coordinates)
+                                )
                             })).sort((a, b) => a.distance - b.distance).slice(0, 5);
 
                             // Update sidebar
                             const sidebar = document.getElementById('sidebar');
-                            sidebar.innerHTML = '<h2 class="text-lg font-bold mb-4">Nearest 5 Points</h2>';
+                            sidebar.innerHTML = '<h2 class="text-lg font-bold mb-4">Nearest Locations</h2>';
                             sortedFeatures.forEach(f => {
                                 const div = document.createElement('div');
-                                div.className = 'mb-4 p-2 bg-gray-100 rounded';
+                                div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item';
                                 div.innerHTML = `
                                     <h3 class="font-bold">${f.properties.name || 'Unnamed'}</h3>
                                     <p>Distance: ${f.distance.toFixed(2)} km</p>
                                     <p>Category: ${f.properties['Project Category'] || 'N/A'}</p>
                                     <p>Amount: ${f.properties['Total Amount'] || 'N/A'}</p>
                                 `;
+                                div.addEventListener('mouseenter', () => {
+                                    map.flyTo({
+                                        center: f.geometry.coordinates,
+                                        zoom: 12
+                                    });
+                                });
                                 sidebar.appendChild(div);
                             });
                         }
@@ -174,41 +177,37 @@
                             map.getCanvas().style.cursor = '';
                         });
 
-                        // Populate filter dropdowns
-                        const stages = [...new Set(data.map(item => item.Stage))];
-                        const categories = [...new Set(data.map(item => item['Project Category']))];
-                        const amountTiers = [...new Set(data.map(item => item['Amount Tier']))];
+                        // Create filters dynamically
+                        const filterContainer = document.getElementById('filterContainer');
+                        const fields = Object.keys(data[0]).slice(0, 4);
+                        const filters = {};
 
-                        populateDropdown('stageFilter', stages);
-                        populateDropdown('categoryFilter', categories);
-                        populateDropdown('amountTierFilter', amountTiers);
+                        fields.forEach(field => {
+                            const values = [...new Set(data.map(item => item[field]))];
+                            const select = document.createElement('select');
+                            select.id = `${field}Filter`;
+                            select.className = 'p-2 border rounded';
+                            select.innerHTML = `<option value="">All ${field}</option>`;
+                            values.forEach(value => {
+                                const option = document.createElement('option');
+                                option.value = value;
+                                option.textContent = value;
+                                select.appendChild(option);
+                            });
+                            filterContainer.appendChild(select);
+                            filters[field] = select;
 
-                        // Add event listeners to filters
-                        document.getElementById('stageFilter').addEventListener('change', applyFilters);
-                        document.getElementById('categoryFilter').addEventListener('change', applyFilters);
-                        document.getElementById('amountTierFilter').addEventListener('change', applyFilters);
+                            select.addEventListener('change', applyFilters);
+                        });
 
                         function applyFilters() {
-                            const stage = document.getElementById('stageFilter').value;
-                            const category = document.getElementById('categoryFilter').value;
-                            const amountTier = document.getElementById('amountTierFilter').value;
-
-                            map.setFilter('deals', ['all',
-                                stage ? ['==', ['get', 'Stage'], stage] : true,
-                                category ? ['==', ['get', 'Project Category'], category] : true,
-                                amountTier ? ['==', ['get', 'Amount Tier'], amountTier] : true
-                            ]);
-                            updateSidebar();
-                        }
-
-                        function populateDropdown(id, options) {
-                            const select = document.getElementById(id);
-                            options.forEach(option => {
-                                const el = document.createElement('option');
-                                el.textContent = option;
-                                el.value = option;
-                                select.appendChild(el);
+                            const filterConditions = Object.entries(filters).map(([field, select]) => {
+                                const value = select.value;
+                                return value ? ['==', ['get', field], value] : true;
                             });
+
+                            map.setFilter('deals', ['all', ...filterConditions]);
+                            updateSidebar();
                         }
                     }
                 });
