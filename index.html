@@ -31,7 +31,7 @@
         mapboxgl.accessToken = 'pk.eyJ1IjoicGxhbmVtYWQiLCJhIjoiY2x2MzZwbGRyMGdheDJtbXVwdDA4aDNyaCJ9.nbvz6aNGQo68xa4NtWH26A';
         const map = new mapboxgl.Map({
             container: 'map',
-            style: 'mapbox://styles/mapbox/satellite-streets-v12',
+            style: 'mapbox://styles/planemad/clzsr0s3c00f701pihaefhc37',
             center: [73.8567, 18.5204],
             zoom: 5,
             hash: true
@@ -69,16 +69,62 @@
                     header: true,
                     complete: function(results) {
                         const data = results.data.filter(row => row.Latitude && row.Longitude);
-                        
-                        console.log("Sheet CSV",data);
+                        console.log("Sheet CSV", data);
+
+                        const validRows = [];
+                        const invalidRows = [];
+
+                        // Function to detect field type
+                        function detectFieldType(value) {
+                            if (!isNaN(parseFloat(value))) return 'number';
+                            if (value.toLowerCase() === 'true' || value.toLowerCase() === 'false') return 'boolean';
+                            return 'string';
+                        }
+
+                        // Detect field types
+                        const fieldTypes = {};
+                        if (data.length > 0) {
+                            Object.keys(data[0]).forEach(key => {
+                                fieldTypes[key] = detectFieldType(data[0][key]);
+                            });
+                        }
+
+                        data.forEach(row => {
+                            const lon = parseFloat(row.Longitude);
+                            const lat = parseFloat(row.Latitude);
+                            if (!isNaN(lon) && !isNaN(lat) && 
+                                lon >= -180 && lon <= 180 && 
+                                lat >= -90 && lat <= 90) {
+                                // Convert fields based on detected types
+                                Object.keys(row).forEach(key => {
+                                    switch (fieldTypes[key]) {
+                                        case 'number':
+                                            row[key] = parseFloat(row[key]);
+                                            break;
+                                        case 'date':
+                                            row[key] = new Date(row[key]);
+                                            break;
+                                        case 'boolean':
+                                            row[key] = row[key].toLowerCase() === 'true';
+                                            break;
+                                    }
+                                });
+                                validRows.push(row);
+                            } else {
+                                invalidRows.push(row);
+                            }
+                        });
+
+                        console.log("Field types:", fieldTypes);
+                        console.log("Invalid rows:", invalidRows);
 
                         const geojson = {
                             type: 'FeatureCollection',
-                            features: data.map(row => ({
+                            features: validRows.map(row => ({
                                 type: 'Feature',
                                 geometry: {
                                     type: 'Point',
-                                    coordinates: [parseFloat(row.Longitude), parseFloat(row.Latitude)]
+                                    coordinates: [row.Longitude, row.Latitude]
                                 },
                                 properties: row
                             }))
@@ -98,8 +144,8 @@
                                     'interpolate',
                                     ['linear'],
                                     ['zoom'],
-                                    10, ['case', ['has', 'circle-radius'], ['get', 'circle-radius'], 3],
-                                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['get', 'circle-radius'], 3]]
+                                    10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
+                                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
                                 ],
                                 'circle-color': [
                                     'case',
@@ -138,8 +184,9 @@
                                 const div = document.createElement('div');
                                 div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item';
                                 div.innerHTML = `
-                                    <h3 class="font-bold">${f.properties.name || 'Unnamed'}</h3>
-                                    <p>Distance: ${f.distance.toFixed(2)} km</p>
+                                    <h3 class="font-bold">Distance: ${f.distance.toFixed(2)} km</h3>
+                                    <h4>${f.properties['name'] || 'N/A'}<h4>
+                                    <p>Address: ${f.properties['Address'] || 'N/A'}</p>
                                     <p>Category: ${f.properties['Project Category'] || 'N/A'}</p>
                                     <p>Amount: ${f.properties['Total Amount'] || 'N/A'}</p>
                                 `;
@@ -147,6 +194,12 @@
                                     map.flyTo({
                                         center: f.geometry.coordinates,
                                         zoom: 12
+                                    });
+                                });
+                                div.addEventListener('click', () => {
+                                    map.flyTo({
+                                        center: f.geometry.coordinates,
+                                        zoom: 14
                                     });
                                 });
                                 sidebar.appendChild(div);
