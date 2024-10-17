@@ -4,21 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sheet Mapper</title>
-    <script src='https://api.mapbox.com/mapbox-gl-js/v2.9.1/mapbox-gl.js'></script>
-    <link href='https://api.mapbox.com/mapbox-gl-js/v2.9.1/mapbox-gl.css' rel='stylesheet' />
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css' rel='stylesheet' />
     <script src='https://unpkg.com/papaparse@5.3.0/papaparse.min.js'></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+    <script src='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v4.7.0/mapbox-gl-geocoder.min.js'></script>
+    <link rel='stylesheet' href='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v4.7.0/mapbox-gl-geocoder.css' type='text/css' />
     <style>
         body { margin: 0; padding: 0; }
         #map { position: absolute; top: 60px; bottom: 0; right: 0; left: 300px; }
         #sidebar { position: absolute; top: 60px; bottom: 0; left: 0; width: 300px; overflow-y: auto; background-color: white; padding: 10px; }
         .sidebar-item:hover { background-color: #f0f0f0; cursor: pointer; }
+        #filterContainer select { font-size: 0.875rem; padding: 0.25rem 0.5rem; }
     </style>
 </head>
 <body class="bg-gray-100">
-    <div class="fixed top-0 left-0 right-0 z-10 bg-white shadow-md p-4">
-        <div id="filterContainer" class="container mx-auto flex flex-wrap space-x-4">
+    <div class="fixed top-0 left-0 right-0 z-10 bg-white shadow-md p-2">
+        <div id="filterContainer" class="container mx-auto flex flex-wrap items-center justify-start gap-2">
             <!-- Filters will be dynamically added here -->
         </div>
     </div>
@@ -28,11 +31,18 @@
         mapboxgl.accessToken = 'pk.eyJ1IjoicGxhbmVtYWQiLCJhIjoiY2x2MzZwbGRyMGdheDJtbXVwdDA4aDNyaCJ9.nbvz6aNGQo68xa4NtWH26A';
         const map = new mapboxgl.Map({
             container: 'map',
-            style: 'mapbox://styles/mapbox/streets-v11',
+            style: 'mapbox://styles/mapbox/satellite-streets-v12',
             center: [73.8567, 18.5204],
             zoom: 5,
             hash: true
         });
+
+                // Add geocoder control
+                const geocoder = new MapboxGeocoder({
+            accessToken: mapboxgl.accessToken,
+            mapboxgl: mapboxgl
+        });
+        map.addControl(geocoder);
 
         // Add geolocate control
         const geolocate = new mapboxgl.GeolocateControl({
@@ -41,7 +51,9 @@
             },
             trackUserLocation: true
         });
-        map.addControl(geolocate);
+        map.addControl(geolocate, 'top-right');
+
+
 
         const urlParams = new URLSearchParams(window.location.search);
         const sheetId = urlParams.get('sheetId');
@@ -82,16 +94,22 @@
                             type: 'circle',
                             source: 'deals',
                             paint: {
-                                'circle-radius': 6,
+                                'circle-radius': [
+                                    'interpolate',
+                                    ['linear'],
+                                    ['zoom'],
+                                    10, ['case', ['has', 'circle-radius'], ['get', 'circle-radius'], 3],
+                                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['get', 'circle-radius'], 3]]
+                                ],
                                 'circle-color': [
                                     'case',
-                                    ['has', 'marker-color'],
-                                    ['get', 'marker-color'],
-                                    '#B42222'
+                                    ['has', 'circle-color'],
+                                    ['get', 'circle-color'],
+                                    'grey'
                                 ],
-                                'circle-stroke-width': 1,
+                                'circle-stroke-width': 2,
                                 'circle-stroke-color': '#ffffff',
-                                'circle-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 1, 0.5]
+                                'circle-opacity': 1
                             }
                         });
 
@@ -186,7 +204,7 @@
                             const values = [...new Set(data.map(item => item[field]))];
                             const select = document.createElement('select');
                             select.id = `${field}Filter`;
-                            select.className = 'p-2 border rounded';
+                            select.className = 'text-sm border rounded';
                             select.innerHTML = `<option value="">All ${field}</option>`;
                             values.forEach(value => {
                                 const option = document.createElement('option');
