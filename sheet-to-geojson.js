@@ -124,7 +124,13 @@ class SheetToGeoJSON {
         const nonEmptyValues = values.filter(value => value !== null && value !== undefined && value !== '');
         if (nonEmptyValues.length === 0) return 'string';
 
-        const allNumbers = nonEmptyValues.every(value => !isNaN(parseFloat(value)));
+        // Check if all values are strings that start with a number
+        const allStringsStartingWithNumber = nonEmptyValues.every(value => 
+            typeof value === 'string' && /^\d/.test(value)
+        );
+        if (allStringsStartingWithNumber) return 'string';
+
+        const allNumbers = nonEmptyValues.every(value => !isNaN(parseFloat(value)) && isFinite(value));
         if (allNumbers) return 'number';
 
         const allBooleans = nonEmptyValues.every(value => value.toLowerCase() === 'true' || value.toLowerCase() === 'false');

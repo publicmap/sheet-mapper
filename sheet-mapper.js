@@ -1,5 +1,6 @@
 // At the top of the file, import the config
 import { config } from './config.js';
+import MapboxGLFilterPanel from './mapbox-gl-filter-panel.js';
 
 mapboxgl.accessToken = config.mapboxgl.accessToken;
 // Replace the map initialization with the config object
@@ -116,40 +117,23 @@ if (!sheetId) {
                 duration: 1000,
             });
 
-            // Create filters dynamically using the first feature's properties
-            if (geojson.features.length > 0) {
-                const filterContainer = document.getElementById('filterContainer');
-                const fields = Object.keys(geojson.features[0].properties).slice(0, 4);
-                const filters = {};
+            // Initialize filter panel
+            const filterPanel = new MapboxGLFilterPanel({
+                geojson: geojson,
+                containerId: 'filterContainer',
+                map: map,
+                layerId: 'sheet-data',
+                numFields: 4
+            });
 
-                fields.forEach(field => {
-                    const values = [...new Set(geojson.features.map(item => item.properties[field]))];
-                    const select = document.createElement('select');
-                    select.id = `${field}Filter`;
-                    select.className = 'text-sm border rounded';
-                    select.innerHTML = `<option value="">All ${field}</option>`;
-                    values.forEach(value => {
-                        const option = document.createElement('option');
-                        option.value = value;
-                        option.textContent = value;
-                        select.appendChild(option);
-                    });
-                    filterContainer.appendChild(select);
-                    filters[field] = select;
-
-                    select.addEventListener('change', applyFilters);
-                });
-
-                function applyFilters() {
-                    const filterConditions = Object.entries(filters).map(([field, select]) => {
-                        const value = select.value;
-                        return value ? ['==', ['get', field], value] : true;
-                    });
-
-                    map.setFilter('sheet-data', ['all', ...filterConditions]);
-                    updateSidebar();
-                }
-            }
+            // Listen for filter changes
+            document.getElementById('filterContainer').addEventListener('filterchange', (event) => {
+                const filteredGeojson = event.detail.filteredGeojson;
+                // Update the source data with filtered GeoJSON
+                map.getSource('sheet-data').setData(filteredGeojson);
+                // Update sidebar with filtered data
+                updateSidebar();
+            });
 
             // Wait for both source and layer to be ready
             const checkSourceAndLayer = () => {
@@ -185,32 +169,29 @@ function getDirectionalArrow(bearing) {
 
 // Update sidebar function
 function updateSidebar() {
-    // Add check to ensure the layer exists before querying
     if (!map.getLayer('sheet-data')) {
         console.log('Sheet data layer not yet loaded');
         return;
     }
 
     const bounds = map.getBounds();
-    let visibleFeatures;
-    
     const mapCenter = map.getCenter();
     const origin = turf.point([mapCenter.lng, mapCenter.lat]);
 
-    const source = map.getSource('sheet-data');
-    if (source && source.loaded()) {
-        visibleFeatures = map.querySourceFeatures('sheet-data', {
-            filter: ['all',
-                ['>=', ['get', 'Longitude'], bounds.getWest()],
-                ['<=', ['get', 'Longitude'], bounds.getEast()],
-                ['>=', ['get', 'Latitude'], bounds.getSouth()],
-                ['<=', ['get', 'Latitude'], bounds.getNorth()]
-            ]
-        });
-        visibleFeatures = [...new Map(visibleFeatures.map(feat => 
-            [feat.properties.row_number, feat]
-        )).values()];
-    }
+    // Get visible features from the current map view
+    let visibleFeatures = map.querySourceFeatures('sheet-data', {
+        filter: ['all',
+            ['>=', ['get', 'Longitude'], bounds.getWest()],
+            ['<=', ['get', 'Longitude'], bounds.getEast()],
+            ['>=', ['get', 'Latitude'], bounds.getSouth()],
+            ['<=', ['get', 'Latitude'], bounds.getNorth()]
+        ]
+    });
+
+    // Remove duplicates based on row_number
+    visibleFeatures = [...new Map(visibleFeatures.map(feat => 
+        [feat.properties.row_number, feat]
+    )).values()];
 
     if (visibleFeatures) {
         visibleFeatures.sort((a, b) => {
