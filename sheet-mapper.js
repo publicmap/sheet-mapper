@@ -1,11 +1,9 @@
-mapboxgl.accessToken = 'pk.eyJ1IjoicGxhbmVtYWQiLCJhIjoiY2x2MzZwbGRyMGdheDJtbXVwdDA4aDNyaCJ9.nbvz6aNGQo68xa4NtWH26A';
-const map = new mapboxgl.Map({
-    container: 'map',
-    style: 'mapbox://styles/planemad/clzsr0s3c00f701pihaefhc37',
-    center: [73.8567, 18.5204],
-    zoom: 5,
-    hash: true
-});
+// At the top of the file, import the config
+import { config } from './config.js';
+
+mapboxgl.accessToken = config.mapboxgl.accessToken;
+// Replace the map initialization with the config object
+const map = new mapboxgl.Map(config.mapboxgl.map);
 
 // Add geocoder control
 const geocoder = new MapboxGeocoder({
@@ -15,12 +13,7 @@ const geocoder = new MapboxGeocoder({
 map.addControl(geocoder);
 
 // Add geolocate control
-const geolocate = new mapboxgl.GeolocateControl({
-    positionOptions: {
-        enableHighAccuracy: true
-    },
-    trackUserLocation: true
-});
+const geolocate = new mapboxgl.GeolocateControl(config.mapboxgl.geolocate);
 map.addControl(geolocate, 'top-right');
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -62,16 +55,16 @@ if (!sheetId) {
             console.log("Invalid rows:", geojson.metadata.invalidRows);
 
             // Add source and layers
-            map.addSource('deals', {
+            map.addSource('sheet-data', {
                 type: 'geojson',
                 data: geojson,
                 promoteId: 'row_number'
             });
 
             map.addLayer({
-                id: 'deals',
+                id: 'sheet-data',
                 type: 'circle',
-                source: 'deals',
+                source: 'sheet-data',
                 paint: {
                     'circle-radius': [
                         'interpolate',
@@ -91,9 +84,9 @@ if (!sheetId) {
             }, 'waterway-label');
 
             map.addLayer({
-                id: 'deals-stroke',
+                id: 'sheet-data-stroke',
                 type: 'circle',
-                source: 'deals',
+                source: 'sheet-data',
                 paint: {
                     'circle-radius': [
                         'interpolate',
@@ -119,7 +112,7 @@ if (!sheetId) {
             });
 
             // Add transition for circle-stroke-width
-            map.setPaintProperty('deals', 'circle-stroke-opacity-transition', {
+            map.setPaintProperty('sheet-data', 'circle-stroke-opacity-transition', {
                 duration: 1000,
             });
 
@@ -153,16 +146,16 @@ if (!sheetId) {
                         return value ? ['==', ['get', field], value] : true;
                     });
 
-                    map.setFilter('deals', ['all', ...filterConditions]);
+                    map.setFilter('sheet-data', ['all', ...filterConditions]);
                     updateSidebar();
                 }
             }
 
             // Wait for both source and layer to be ready
             const checkSourceAndLayer = () => {
-                if (map.getSource('deals') && 
-                    map.getSource('deals').loaded() && 
-                    map.getLayer('deals') && 
+                if (map.getSource('sheet-data') && 
+                    map.getSource('sheet-data').loaded() && 
+                    map.getLayer('sheet-data') && 
                     map.isStyleLoaded()) {
                     updateSidebar();
                 } else {
@@ -193,8 +186,8 @@ function getDirectionalArrow(bearing) {
 // Update sidebar function
 function updateSidebar() {
     // Add check to ensure the layer exists before querying
-    if (!map.getLayer('deals')) {
-        console.log('Deals layer not yet loaded');
+    if (!map.getLayer('sheet-data')) {
+        console.log('Sheet data layer not yet loaded');
         return;
     }
 
@@ -204,9 +197,9 @@ function updateSidebar() {
     const mapCenter = map.getCenter();
     const origin = turf.point([mapCenter.lng, mapCenter.lat]);
 
-    const source = map.getSource('deals');
+    const source = map.getSource('sheet-data');
     if (source && source.loaded()) {
-        visibleFeatures = map.querySourceFeatures('deals', {
+        visibleFeatures = map.querySourceFeatures('sheet-data', {
             filter: ['all',
                 ['>=', ['get', 'Longitude'], bounds.getWest()],
                 ['<=', ['get', 'Longitude'], bounds.getEast()],
@@ -270,7 +263,7 @@ function updateSidebar() {
                     // Clear previous selection
                     if (selectedStateId !== null) {
                         map.setFeatureState(
-                            { source: 'deals', id: selectedStateId },
+                            { source: 'sheet-data', id: selectedStateId },
                             { selected: false }
                         );
                         const prevSelected = document.querySelector('.sidebar-item.selected');
@@ -280,7 +273,7 @@ function updateSidebar() {
                     // Set new selection
                     selectedStateId = rowNumber;
                     map.setFeatureState(
-                        { source: 'deals', id: selectedStateId },
+                        { source: 'sheet-data', id: selectedStateId },
                         { selected: true }
                     );
                     div.classList.add('selected');
@@ -297,13 +290,13 @@ function updateSidebar() {
                 if (!isNaN(rowNumber)) {
                     if (hoveredStateId !== null) {
                         map.setFeatureState(
-                            { source: 'deals', id: hoveredStateId },
+                            { source: 'sheet-data', id: hoveredStateId },
                             { hover: false }
                         );
                     }
                     hoveredStateId = rowNumber;
                     map.setFeatureState(
-                        { source: 'deals', id: hoveredStateId },
+                        { source: 'sheet-data', id: hoveredStateId },
                         { hover: true }
                     );
                 }
@@ -312,7 +305,7 @@ function updateSidebar() {
             div.addEventListener('mouseleave', () => {
                 if (hoveredStateId !== null) {
                     map.setFeatureState(
-                        { source: 'deals', id: hoveredStateId },
+                        { source: 'sheet-data', id: hoveredStateId },
                         { hover: false }
                     );
                     hoveredStateId = null;
@@ -336,7 +329,7 @@ map.on('mousemove', (e) => {
         [e.point.x - 100, e.point.y - 100],
         [e.point.x + 100, e.point.y + 100]
     ];
-    const features = map.queryRenderedFeatures(bbox, { layers: ['deals'] });
+    const features = map.queryRenderedFeatures(bbox, { layers: ['sheet-data'] });
     
     if (features.length > 0) {
         const mousePoint = turf.point([e.lngLat.lng, e.lngLat.lat]);
@@ -357,13 +350,13 @@ map.on('mousemove', (e) => {
         if (hoveredStateId !== newHoveredStateId) {
             if (hoveredStateId !== null) {
                 map.setFeatureState(
-                    { source: 'deals', id: hoveredStateId },
+                    { source: 'sheet-data', id: hoveredStateId },
                     { hover: false }
                 );
             }
             hoveredStateId = newHoveredStateId;
             map.setFeatureState(
-                { source: 'deals', id: hoveredStateId },
+                { source: 'sheet-data', id: hoveredStateId },
                 { hover: true }
             );
         }
@@ -389,18 +382,18 @@ map.on('mousemove', (e) => {
     }
 });
 
-map.on('mouseleave', 'deals', () => {
+map.on('mouseleave', 'sheet-data', () => {
     if (hoveredStateId !== null) {
         map.setFeatureState(
-            { source: 'deals', id: hoveredStateId },
+            { source: 'sheet-data', id: hoveredStateId },
             { hover: false }
         );
         hoveredStateId = null;
     }
 });
 
-// Click handling for deals layer
-map.on('click', 'deals', (e) => {
+// Click handling for sheet-data layer
+map.on('click', 'sheet-data', (e) => {
     const coordinates = e.features[0].geometry.coordinates.slice();
     const properties = e.features[0].properties;
     const rowNumber = properties.row_number;
@@ -408,7 +401,7 @@ map.on('click', 'deals', (e) => {
     // Clear previous selection
     if (selectedStateId !== null) {
         map.setFeatureState(
-            { source: 'deals', id: selectedStateId },
+            { source: 'sheet-data', id: selectedStateId },
             { selected: false }
         );
         const prevSelected = document.querySelector('.sidebar-item.selected');
@@ -418,7 +411,7 @@ map.on('click', 'deals', (e) => {
     // Set new selection
     selectedStateId = rowNumber;
     map.setFeatureState(
-        { source: 'deals', id: selectedStateId },
+        { source: 'sheet-data', id: selectedStateId },
         { selected: true }
     );
     
@@ -428,8 +421,8 @@ map.on('click', 'deals', (e) => {
         sidebarItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    // Update the deals-stroke layer to show selected state
-    map.setPaintProperty('deals-stroke', 'circle-stroke-width', [
+    // Update the sheet-data-stroke layer to show selected state
+    map.setPaintProperty('sheet-data-stroke', 'circle-stroke-width', [
         'case',
         ['boolean', ['feature-state', 'selected'], false],
         12,
@@ -460,10 +453,10 @@ map.on('click', 'deals', (e) => {
 });
 
 // Cursor styling
-map.on('mouseenter', 'deals', () => {
+map.on('mouseenter', 'sheet-data', () => {
     map.getCanvas().style.cursor = 'pointer';
 });
 
-map.on('mouseleave', 'deals', () => {
+map.on('mouseleave', 'sheet-data', () => {
     map.getCanvas().style.cursor = '';
 }); 
