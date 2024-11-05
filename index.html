@@ -8,9 +8,16 @@
     <link href='https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css' rel='stylesheet' />
     <script src='https://unpkg.com/papaparse@5.3.0/papaparse.min.js'></script>
     <script src="https://cdn.tailwindcss.com"></script>
+
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+
     <script src='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.min.js'></script>
     <link rel='stylesheet' href='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.css' type='text/css' />
+    
+    <!-- Generate legend from Mapbox styles https://github.com/watergis/mapbox-gl-legend -->
+    <link href='https://watergis.github.io/mapbox-gl-legend/mapbox-gl-legend.css' rel='stylesheet' />
+<script src="https://watergis.github.io/mapbox-gl-legend/mapbox-gl-legend.js"></script>
+
     <style>
         body { margin: 0; padding: 0; }
         #map { position: relative; height: calc(100vh - 120px); width: 100%; }
@@ -173,7 +180,6 @@
                             data: geojson,
                             promoteId: 'row_number'
                         });
-
                         // Add a layer to the map to render the point features as circles
                         map.addLayer({
                             id: 'deals',
@@ -193,27 +199,144 @@
                                     ['get', 'circle-color'],
                                     'grey'
                                 ],
-                                'circle-stroke-width': 2,
-                                'circle-stroke-color': '#ffffff',
+                                'circle-stroke-width': [
+                                    'case',
+                                    ['boolean', ['feature-state', 'hover'], false],
+                                    10,
+                                    2
+                                ],
+                                'circle-stroke-color': [
+                                    'case',
+                                    ['boolean', ['feature-state', 'hover'], false],
+                                    '#000000',
+                                    '#ffffff'
+                                ],
                                 'circle-opacity': 1
                             }
+                        }, 'waterway-label');
+
+                        // Add a transition for the circle-stroke-width
+                        map.setPaintProperty('deals', 'circle-stroke-opacity-transition', {
+                            duration: 10000,
+                            delay: 1000
                         });
 
                         function updateSidebar() {
+                            const bounds = map.getBounds();
+                            let visibleFeatures;
+                            
+                            // Get the map center as the reference point
+                            const mapCenter = map.getCenter();
+                            const origin = turf.point([mapCenter.lng, mapCenter.lat]);
+
+                            // Check if the source is loaded
+                            const source = map.getSource('deals');
+                            if (source && source.loaded()) {
+                                // Use querySourceFeatures for live updates
+                                visibleFeatures = map.querySourceFeatures('deals', {
+                                    filter: ['all',
+                                        ['>=', ['get', 'Longitude'], bounds.getWest()],
+                                        ['<=', ['get', 'Longitude'], bounds.getEast()],
+                                        ['>=', ['get', 'Latitude'], bounds.getSouth()],
+                                        ['<=', ['get', 'Latitude'], bounds.getNorth()]
+                                    ]
+                                });
+                                // Deduplicate features
+                                visibleFeatures = [...new Map(visibleFeatures.map(feat => 
+                                    [feat.properties.row_number, feat]
+                                )).values()];
+                            } else {
+                                // Fall back to filtering the original geojson for initial load
+                                visibleFeatures = geojson.features.filter(feature => {
+                                    const [lng, lat] = feature.geometry.coordinates;
+                                    return lng >= bounds.getWest() &&
+                                           lng <= bounds.getEast() &&
+                                           lat >= bounds.getSouth() &&
+                                           lat <= bounds.getNorth();
+                                });
+                            }
+
+                            // Sort features by distance from map center
+                            visibleFeatures.sort((a, b) => {
+                                const pointA = turf.point(a.geometry.coordinates);
+                                const pointB = turf.point(b.geometry.coordinates);
+                                const distanceA = turf.distance(origin, pointA);
+                                const distanceB = turf.distance(origin, pointB);
+                                return distanceA - distanceB;
+                            });
+
                             const sidebar = document.getElementById('sidebar');
-                            sidebar.innerHTML = '<h2 class="text-lg font-bold mb-4">All Locations</h2>';
-                            validRows.forEach(row => {
+                            sidebar.innerHTML = `<h2 class="text-lg font-bold mb-4">Visible Locations (${visibleFeatures.length})</h2>`;
+                            
+                            visibleFeatures.forEach(feature => {
+                                const props = feature.properties;
+                                const coords = feature.geometry.coordinates;
+                                
+                                // Calculate distance
+                                const destination = turf.point(coords);
+                                const distance = turf.distance(origin, destination, {units: 'kilometers'});
+                                const formattedDistance = distance < 1 
+                                    ? `${Math.round(distance * 1000)} m` 
+                                    : `${Math.round(distance * 10) / 10} km`;
+
+                                // Get direction arrow or dot based on distance
+                                const rotatedArrow = distance < 0.01 ? '•' : getDirectionalArrow(turf.bearing(origin, destination));
+
                                 const div = document.createElement('div');
-                                div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item';
-                                div.setAttribute('data-lng', row.Longitude);
-                                div.setAttribute('data-lat', row.Latitude);
-                                div.setAttribute('data-row', row.row_number);
+                                div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item hover:bg-gray-200 transition-colors duration-150';
+                                div.setAttribute('data-lng', props.Longitude);
+                                div.setAttribute('data-lat', props.Latitude);
+                                div.setAttribute('data-row', props.row_number);
+                                
+                                // Add hover handlers
+                                let hoveredStateId = null;
+                                
+                                div.addEventListener('mouseenter', () => {
+                                    // Remove previous hover state
+                                    if (hoveredStateId) {
+                                        map.setFeatureState(
+                                            { source: 'deals', id: hoveredStateId },
+                                            { hover: false }
+                                        );
+                                    }
+                                    
+                                    // Add hover state to this feature
+                                    hoveredStateId = props.row_number;
+                                    map.setFeatureState(
+                                        { source: 'deals', id: hoveredStateId },
+                                        { hover: true }
+                                    );
+                                    
+                                    // Add hover class to div
+                                    div.classList.add('bg-gray-200');
+                                });
+
+                                div.addEventListener('mouseleave', () => {
+                                    // Remove hover state
+                                    if (hoveredStateId) {
+                                        map.setFeatureState(
+                                            { source: 'deals', id: hoveredStateId },
+                                            { hover: false }
+                                        );
+                                    }
+                                    hoveredStateId = null;
+                                    
+                                    // Remove hover class from div
+                                    div.classList.remove('bg-gray-200');
+                                });
+
                                 div.innerHTML = `
-                                    <h4>${row['name'] || 'N/A'}</h4>
-                                    <p>Address: ${row['Address'] || 'N/A'}</p>
-                                    <p>Category: ${row['Project Category'] || 'N/A'}</p>
-                                    <p>Amount: ${row['Total Amount'] || 'N/A'}</p>
+                                    <div class="flex justify-between items-start">
+                                        <h4>${props['name'] || 'N/A'}</h4>
+                                        <span class="text-sm text-gray-600">
+                                            ${rotatedArrow} ${formattedDistance} away
+                                        </span>
+                                    </div>
+                                    <p>Address: ${props['Address'] || 'N/A'}</p>
+                                    <p>Category: ${props['Project Category'] || 'N/A'}</p>
+                                    <p>Amount: ${props['Total Amount'] || 'N/A'}</p>
                                 `;
+                                
                                 div.addEventListener('click', () => {
                                     const lng = parseFloat(div.getAttribute('data-lng'));
                                     const lat = parseFloat(div.getAttribute('data-lat'));
@@ -228,8 +351,8 @@
                             });
                         }
 
-                        // Update sidebar as soon as data loads
-                        updateSidebar();
+                        // Update sidebar when map moves
+                        map.on('moveend', updateSidebar);
 
                         map.on('click', 'deals', (e) => {
                             const coordinates = e.features[0].geometry.coordinates.slice();
@@ -296,10 +419,70 @@
                             map.setFilter('deals', ['all', ...filterConditions]);
                             updateSidebar();
                         }
+
+                        // Trigger initial sidebar update after layer is added
+                        updateSidebar();
                     }
                 });
             });
         }
+
+        // Helper function to get the appropriate arrow based on bearing
+        function getDirectionalArrow(bearing) {
+            // Normalize bearing to 0-360
+            bearing = ((bearing + 360) % 360);
+            
+            // Convert bearing to 8 cardinal/intercardinal directions
+            if (bearing >= 337.5 || bearing < 22.5) return '↑';
+            if (bearing >= 22.5 && bearing < 67.5) return '↗';
+            if (bearing >= 67.5 && bearing < 112.5) return '→';
+            if (bearing >= 112.5 && bearing < 157.5) return '↘';
+            if (bearing >= 157.5 && bearing < 202.5) return '↓';
+            if (bearing >= 202.5 && bearing < 247.5) return '↙';
+            if (bearing >= 247.5 && bearing < 292.5) return '←';
+            return '↖';
+        }
+
+        // Also add hover handlers for map features
+        let hoveredStateId = null;
+
+        map.on('mousemove', 'deals', (e) => {
+            if (e.features.length > 0) {
+                if (hoveredStateId) {
+                    map.setFeatureState(
+                        { source: 'deals', id: hoveredStateId },
+                        { hover: false }
+                    );
+                }
+                hoveredStateId = e.features[0].properties.row_number;
+                map.setFeatureState(
+                    { source: 'deals', id: hoveredStateId },
+                    { hover: true }
+                );
+                
+                // Also highlight the corresponding sidebar item
+                const sidebarItem = document.querySelector(`[data-row="${hoveredStateId}"]`);
+                if (sidebarItem) {
+                    sidebarItem.classList.add('bg-gray-200');
+                }
+            }
+        });
+
+        map.on('mouseleave', 'deals', () => {
+            if (hoveredStateId) {
+                map.setFeatureState(
+                    { source: 'deals', id: hoveredStateId },
+                    { hover: false }
+                );
+                
+                // Remove highlight from sidebar item
+                const sidebarItem = document.querySelector(`[data-row="${hoveredStateId}"]`);
+                if (sidebarItem) {
+                    sidebarItem.classList.remove('bg-gray-200');
+                }
+            }
+            hoveredStateId = null;
+        });
     </script>
 </body>
 </html>
