@@ -183,6 +183,16 @@ function updateSidebar(features) {
         return;
     }
 
+    // If features not provided, get all features from the source
+    if (!features) {
+        const source = map.getSource('sheet-data');
+        if (!source) return;
+        
+        // Get the current source data
+        const sourceData = source._data;
+        features = sourceData.features;
+    }
+
     const mapCenter = map.getCenter();
     const origin = turf.point([mapCenter.lng, mapCenter.lat]);
 
