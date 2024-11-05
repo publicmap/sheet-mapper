@@ -114,16 +114,32 @@ class SheetToGeoJSON {
         const fieldTypes = {};
         if (data.length > 0) {
             Object.keys(data[0]).forEach(key => {
-                fieldTypes[key] = this.detectFieldType(data[0][key]);
+                fieldTypes[key] = this.detectFieldType(data.map(row => row[key]));
             });
         }
         return fieldTypes;
     }
 
-    detectFieldType(value) {
-        if (!isNaN(parseFloat(value))) return 'number';
-        if (value.toLowerCase() === 'true' || value.toLowerCase() === 'false') return 'boolean';
-        if (!isNaN(Date.parse(value))) return 'date';
+    detectFieldType(values) {
+        const nonEmptyValues = values.filter(value => value !== null && value !== undefined && value !== '');
+        if (nonEmptyValues.length === 0) return 'string';
+
+        const allNumbers = nonEmptyValues.every(value => !isNaN(parseFloat(value)));
+        if (allNumbers) return 'number';
+
+        const allBooleans = nonEmptyValues.every(value => value.toLowerCase() === 'true' || value.toLowerCase() === 'false');
+        if (allBooleans) return 'boolean';
+
+        const allDates = nonEmptyValues.every(value => !isNaN(Date.parse(value)));
+        if (allDates) {
+            // Check if all values are actually dates and not just numbers
+            const allAreDates = nonEmptyValues.every(value => {
+                const date = new Date(value);
+                return date instanceof Date && !isNaN(date) && date.toISOString() !== new Date(0).toISOString();
+            });
+            if (allAreDates) return 'date';
+        }
+
         return 'string';
     }
 

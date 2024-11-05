@@ -228,6 +228,9 @@ function updateSidebar() {
             const props = feature.properties;
             const coords = feature.geometry.coordinates;
             
+            const circleRadius = props['circle-radius'] || 3;
+            const circleColor = props['circle-color'] || 'grey';
+            
             const destination = turf.point(coords);
             const distance = turf.distance(origin, destination, {units: 'kilometers'});
             const formattedDistance = distance < 1 
@@ -244,7 +247,19 @@ function updateSidebar() {
             
             div.innerHTML = `
                 <div class="flex justify-between items-start">
-                    <h4>${props['name'] || 'N/A'}</h4>
+                    <div class="flex items-center gap-2">
+                        <svg width="${circleRadius * 2 + 4}" height="${circleRadius * 2 + 4}" class="flex-shrink-0">
+                            <circle 
+                                cx="${circleRadius + 2}" 
+                                cy="${circleRadius + 2}" 
+                                r="${circleRadius}"
+                                fill="${circleColor}"
+                                stroke="white"
+                                stroke-width="2"
+                            />
+                        </svg>
+                        <h4>${props['name'] || 'N/A'}</h4>
+                    </div>
                     <span class="text-sm text-gray-600">
                         ${rotatedArrow} ${formattedDistance} away
                     </span>
@@ -314,6 +329,13 @@ function updateSidebar() {
 
             sidebar.appendChild(div);
         });
+
+        // Animate scroll to top of the sidebar
+        sidebar.scrollTo({
+            top: 0,
+            behavior: 'smooth',
+            duration: 500
+        });
     }
 }
 
@@ -323,7 +345,6 @@ map.on('moveend', updateSidebar);
 // Hover state handling
 let hoveredStateId = null;
 let selectedStateId = null;
-
 map.on('mousemove', (e) => {
     const bbox = [
         [e.point.x - 100, e.point.y - 100],
@@ -377,8 +398,51 @@ map.on('mousemove', (e) => {
         
         const sidebarItem = document.querySelector(`[data-row="${hoveredStateId}"]`);
         if (sidebarItem) {
+            // Remove highlight from all items first
+            document.querySelectorAll('.sidebar-item').forEach(item => {
+                item.classList.remove('bg-gray-200');
+            });
+            
+            // Add highlight to current item
             sidebarItem.classList.add('bg-gray-200');
+            
+            // Get the sidebar element
+            const sidebar = document.getElementById('sidebar');
+            
+            // Calculate scroll position
+            const itemTop = sidebarItem.offsetTop;
+            const sidebarScrollTop = sidebar.scrollTop;
+            const sidebarHeight = sidebar.clientHeight;
+            const itemHeight = sidebarItem.clientHeight;
+            
+            // Only scroll if item is not fully visible
+            if (itemTop < sidebarScrollTop || itemTop + itemHeight > sidebarScrollTop + sidebarHeight) {
+                sidebar.scrollTo({
+                    top: itemTop - (sidebarHeight / 2) + (itemHeight / 2),
+                    behavior: 'auto',
+                    duration: 50
+                });
+            }
         }
+    } else {
+        // Reset hover line data if there are no nearby features
+        map.getSource('hover-line').setData({
+            type: 'FeatureCollection',
+            features: []
+        });
+        
+        if (hoveredStateId !== null) {
+            map.setFeatureState(
+                { source: 'sheet-data', id: hoveredStateId },
+                { hover: false }
+            );
+            hoveredStateId = null;
+        }
+        
+        // Remove highlight from all items when no feature is hovered
+        document.querySelectorAll('.sidebar-item').forEach(item => {
+            item.classList.remove('bg-gray-200');
+        });
     }
 });
 
