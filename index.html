@@ -105,6 +105,26 @@
             viewSheetDataButton.href = `https://docs.google.com/spreadsheets/d/e/${sheetId}/pubhtml`;
 
             map.on('load', () => {
+                // Add the hover line source and layer before loading the CSV data
+                map.addSource('hover-line', {
+                    type: 'geojson',
+                    data: {
+                        type: 'FeatureCollection',
+                        features: []
+                    }
+                });
+
+                map.addLayer({
+                    id: 'hover-line',
+                    type: 'line',
+                    source: 'hover-line',
+                    paint: {
+                        'line-color': '#000',
+                        'line-width': 1,
+                        'line-dasharray': [2, 2]
+                    }
+                });
+
                 Papa.parse(sheetUrl, {
                     download: true,
                     header: true,
@@ -158,7 +178,7 @@
                             }
                         });
 
-                        console.log("Field types:", fieldTypes);
+                        console.log("Detected Field types:", fieldTypes);
                         console.log("Invalid rows:", invalidRows);
 
                         const geojson = {
@@ -199,6 +219,23 @@
                                     ['get', 'circle-color'],
                                     'grey'
                                 ],
+                                'circle-opacity': 1
+                            }
+                        }, 'waterway-label');
+
+                        // Add a separate layer for the stroke styles
+                        map.addLayer({
+                            id: 'deals-stroke',
+                            type: 'circle',
+                            source: 'deals',
+                            paint: {
+                                'circle-radius': [
+                                    'interpolate',
+                                    ['linear'],
+                                    ['zoom'],
+                                    10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
+                                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
+                                ],
                                 'circle-stroke-width': [
                                     'case',
                                     ['boolean', ['feature-state', 'hover'], false],
@@ -211,14 +248,13 @@
                                     '#000000',
                                     '#ffffff'
                                 ],
-                                'circle-opacity': 1
+                                'circle-color': 'rgba(0, 0, 0, 0)'
                             }
-                        }, 'waterway-label');
+                        });
 
                         // Add a transition for the circle-stroke-width
                         map.setPaintProperty('deals', 'circle-stroke-opacity-transition', {
-                            duration: 10000,
-                            delay: 1000
+                            duration: 1000,
                         });
 
                         function updateSidebar() {
@@ -349,6 +385,33 @@
                                 });
                                 sidebar.appendChild(div);
                             });
+
+                            // Smooth scroll to top
+                            if ('scrollBehavior' in document.documentElement.style) {
+                                // Modern browsers
+                                sidebar.scrollTo({
+                                    top: 0,
+                                    behavior: 'smooth',
+                                    duration: 600
+                                });
+                            } else {
+                                // Fallback for older browsers
+                                const start = sidebar.scrollTop;
+                                const startTime = performance.now();
+                                
+                                function scrollStep(currentTime) {
+                                    const elapsed = currentTime - startTime;
+                                    const progress = Math.min(elapsed / 600, 1);
+                                    
+                                    sidebar.scrollTop = start * (1 - progress);
+                                    
+                                    if (progress < 1) {
+                                        requestAnimationFrame(scrollStep);
+                                    }
+                                }
+                                
+                                requestAnimationFrame(scrollStep);
+                            }
                         }
 
                         // Update sidebar when map moves
@@ -445,31 +508,203 @@
 
         // Also add hover handlers for map features
         let hoveredStateId = null;
+        // Add mousemove handler for the entire map
+        map.on('mousemove', (e) => {
+            const bbox = [
+                [e.point.x - 100, e.point.y - 100],
+                [e.point.x + 100, e.point.y + 100]
+            ];
+            const features = map.queryRenderedFeatures(bbox, { layers: ['deals'] });
+            
+            if (features.length > 0) {
+                // Find the closest feature
+                const mousePoint = turf.point([e.lngLat.lng, e.lngLat.lat]);
+                let closestFeature = features[0];
+                let minDistance = Infinity;
 
-        map.on('mousemove', 'deals', (e) => {
-            if (e.features.length > 0) {
-                if (hoveredStateId) {
+                features.forEach(feature => {
+                    const featurePoint = turf.point(feature.geometry.coordinates);
+                    const distance = turf.distance(mousePoint, featurePoint);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestFeature = feature;
+                    }
+                });
+
+                const hoveredStateId = closestFeature.properties.row_number;
+                
+                // Update feature state
+                if (hoveredStateId !== null) {
                     map.setFeatureState(
                         { source: 'deals', id: hoveredStateId },
-                        { hover: false }
+                        { hover: true }
                     );
                 }
-                hoveredStateId = e.features[0].properties.row_number;
-                map.setFeatureState(
-                    { source: 'deals', id: hoveredStateId },
-                    { hover: true }
-                );
                 
-                // Also highlight the corresponding sidebar item
+                // Update hover line
+                const mouseCoords = [e.lngLat.lng, e.lngLat.lat];
+                const closestPoint = closestFeature.geometry.coordinates;
+                
+                map.getSource('hover-line').setData({
+                    type: 'FeatureCollection',
+                    features: [{
+                        type: 'Feature',
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: [mouseCoords, closestPoint]
+                        }
+                    }]
+                });
+                
+                // Highlight corresponding sidebar item
                 const sidebarItem = document.querySelector(`[data-row="${hoveredStateId}"]`);
                 if (sidebarItem) {
                     sidebarItem.classList.add('bg-gray-200');
                 }
+            } else {
+                // Clear hover line when not over a feature
+                map.getSource('hover-line').setData({
+                    type: 'FeatureCollection',
+                    features: []
+                });
             }
         });
 
-        map.on('mouseleave', 'deals', () => {
-            if (hoveredStateId) {
+        // Add handler for end of map move
+        map.on('moveend', () => {
+            const bounds = map.getBounds();
+            let visibleFeatures;
+            
+            // Get the map center as the reference point
+            const mapCenter = map.getCenter();
+            const origin = turf.point([mapCenter.lng, mapCenter.lat]);
+
+            // Check if the source is loaded
+            const source = map.getSource('deals');
+            if (source && source.loaded()) {
+                // Use querySourceFeatures for live updates
+                visibleFeatures = map.querySourceFeatures('deals', {
+                    filter: ['all',
+                        ['>=', ['get', 'Longitude'], bounds.getWest()],
+                        ['<=', ['get', 'Longitude'], bounds.getEast()],
+                        ['>=', ['get', 'Latitude'], bounds.getSouth()],
+                        ['<=', ['get', 'Latitude'], bounds.getNorth()]
+                    ]
+                });
+                // Deduplicate features
+                visibleFeatures = [...new Map(visibleFeatures.map(feat => 
+                    [feat.properties.row_number, feat]
+                )).values()];
+            } else {
+                // Fall back to filtering the original geojson for initial load
+                visibleFeatures = geojson.features.filter(feature => {
+                    const [lng, lat] = feature.geometry.coordinates;
+                    return lng >= bounds.getWest() &&
+                           lng <= bounds.getEast() &&
+                           lat >= bounds.getSouth() &&
+                           lat <= bounds.getNorth();
+                });
+            }
+
+            // Sort features by distance from map center
+            visibleFeatures.sort((a, b) => {
+                const pointA = turf.point(a.geometry.coordinates);
+                const pointB = turf.point(b.geometry.coordinates);
+                const distanceA = turf.distance(origin, pointA);
+                const distanceB = turf.distance(origin, pointB);
+                return distanceA - distanceB;
+            });
+
+            // Update sidebar with visible features
+            // Update the sidebar with visible features
+            const sidebar = document.getElementById('sidebar');
+            sidebar.innerHTML = '';
+
+            visibleFeatures.forEach(feature => {
+                const props = feature.properties;
+                const coordinates = feature.geometry.coordinates;
+                
+                // Calculate distance and bearing from map center
+                const point = turf.point(coordinates);
+                const distance = turf.distance(origin, point);
+                const bearing = turf.bearing(origin, point);
+                
+                // Format distance
+                let formattedDistance;
+                if (distance < 1) {
+                    formattedDistance = `${Math.round(distance * 1000)}m`;
+                } else {
+                    formattedDistance = `${distance.toFixed(1)}km`;
+                }
+                
+                // Create arrow pointing in direction
+                const rotatedArrow = `<span style="display:inline-block; transform:rotate(${bearing}deg)">↑</span>`;
+                
+                const div = document.createElement('div');
+                div.className = 'p-4 border-b border-gray-200 cursor-pointer hover:bg-gray-100';
+                div.setAttribute('data-lng', coordinates[0]);
+                div.setAttribute('data-lat', coordinates[1]);
+                div.setAttribute('data-row', props.row_number);
+                
+                // Add hover handlers
+                let hoveredStateId = null;
+                
+                div.addEventListener('mouseenter', () => {
+                    if (hoveredStateId) {
+                        map.setFeatureState(
+                            { source: 'deals', id: hoveredStateId },
+                            { hover: false }
+                        );
+                    }
+                    hoveredStateId = props.row_number;
+                    map.setFeatureState(
+                        { source: 'deals', id: hoveredStateId },
+                        { hover: true }
+                    );
+                    div.classList.add('bg-gray-200');
+                });
+
+                div.addEventListener('mouseleave', () => {
+                    if (hoveredStateId) {
+                        map.setFeatureState(
+                            { source: 'deals', id: hoveredStateId },
+                            { hover: false }
+                        );
+                    }
+                    hoveredStateId = null;
+                    div.classList.remove('bg-gray-200');
+                });
+
+                div.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <h4>${props['name'] || 'N/A'}</h4>
+                        <span class="text-sm text-gray-600">
+                            ${rotatedArrow} ${formattedDistance} away
+                        </span>
+                    </div>
+                    <p>Address: ${props['Address'] || 'N/A'}</p>
+                    <p>Category: ${props['Project Category'] || 'N/A'}</p>
+                    <p>Amount: ${props['Total Amount'] || 'N/A'}</p>
+                `;
+                
+                div.addEventListener('click', () => {
+                    const lng = parseFloat(div.getAttribute('data-lng'));
+                    const lat = parseFloat(div.getAttribute('data-lat'));
+                    if (!isNaN(lng) && !isNaN(lat)) {
+                        map.flyTo({
+                            center: [lng, lat],
+                            zoom: 14
+                        });
+                    }
+                });
+                sidebar.appendChild(div);
+            });
+        });
+
+        // Add mouseout handler for the entire map
+        map.on('mouseout', () => {
+            // Clear all hover states
+            if (hoveredStateId !== null) {
                 map.setFeatureState(
                     { source: 'deals', id: hoveredStateId },
                     { hover: false }
@@ -480,8 +715,42 @@
                 if (sidebarItem) {
                     sidebarItem.classList.remove('bg-gray-200');
                 }
+                
+                hoveredStateId = null;
             }
-            hoveredStateId = null;
+            
+            // Clear hover line
+            map.getSource('hover-line').setData({
+                type: 'FeatureCollection',
+                features: []
+            });
+        });
+
+        // Keep the existing 'deals' layer mousemove and mouseleave handlers for additional functionality if needed
+        map.on('mousemove', 'deals', (e) => {
+            if (e.features.length > 0) {
+                if (hoveredStateId !== null) {
+                    map.setFeatureState(
+                        { source: 'deals', id: hoveredStateId },
+                        { hover: false }
+                    );
+                }
+                hoveredStateId = e.features[0].properties.row_number;
+                map.setFeatureState(
+                    { source: 'deals', id: hoveredStateId },
+                    { hover: true }
+                );
+            }
+        });
+
+        map.on('mouseleave', 'deals', () => {
+            if (hoveredStateId !== null) {
+                map.setFeatureState(
+                    { source: 'deals', id: hoveredStateId },
+                    { hover: false }
+                );
+                hoveredStateId = null;
+            }
         });
     </script>
 </body>
