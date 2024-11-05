@@ -4,29 +4,63 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sheet Mapper</title>
-    <script src='https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js'></script>
-    <link href='https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css' rel='stylesheet' />
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css' rel='stylesheet' />
     <script src='https://unpkg.com/papaparse@5.3.0/papaparse.min.js'></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
-    <script src='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v4.7.0/mapbox-gl-geocoder.min.js'></script>
-    <link rel='stylesheet' href='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v4.7.0/mapbox-gl-geocoder.css' type='text/css' />
+    <script src='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.min.js'></script>
+    <link rel='stylesheet' href='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.css' type='text/css' />
     <style>
         body { margin: 0; padding: 0; }
-        #map { position: absolute; top: 60px; bottom: 0; right: 0; left: 300px; }
-        #sidebar { position: absolute; top: 60px; bottom: 0; left: 0; width: 300px; overflow-y: auto; background-color: white; padding: 10px; }
-        .sidebar-item:hover { background-color: #f0f0f0; cursor: pointer; }
-        #filterContainer select { font-size: 0.875rem; padding: 0.25rem 0.5rem; }
+        #map { position: relative; height: calc(100vh - 120px); width: 100%; }
+        #center-marker {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 1;
+        }
     </style>
 </head>
 <body class="bg-gray-100">
-    <div class="fixed top-0 left-0 right-0 z-10 bg-white shadow-md p-2">
-        <div id="filterContainer" class="container mx-auto flex flex-wrap items-center justify-start gap-2">
-            <!-- Filters will be dynamically added here -->
+    <!-- Header -->
+    <header class="bg-white shadow-md p-4">
+        <div class="container mx-auto">
+            <!-- Sheet button row -->
+            <div class="mb-4">
+                <a id="viewSheetData" href="#" target="_blank" class="inline-block px-4 py-2 bg-blue-500 text-white font-bold rounded hover:bg-blue-600">
+                    Open Spreadsheet
+                    <svg class="inline-block w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                    </svg>
+                </a>
+            </div>
+            <!-- Filters row -->
+            <div id="filterContainer" class="flex flex-wrap items-center gap-2">
+                <!-- Filters will be dynamically added here -->
+            </div>
+        </div>
+    </header>
+
+    <!-- Main content -->
+    <div class="container mx-auto flex">
+        <!-- Sidebar -->
+        <div id="sidebar" class="w-1/4 bg-white p-4 overflow-y-auto h-[calc(100vh-120px)]"></div>
+        <!-- Map container -->
+        <div class="w-3/4">
+            <div id="map">
+                <div id="center-marker">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="10" cy="10" r="8" stroke="black" stroke-width="2"/>
+                        <circle cx="10" cy="10" r="2" fill="black"/>
+                    </svg>
+                </div>
+            </div>
         </div>
     </div>
-    <div id="sidebar"></div>
-    <div id="map"></div>
+
     <script>
         mapboxgl.accessToken = 'pk.eyJ1IjoicGxhbmVtYWQiLCJhIjoiY2x2MzZwbGRyMGdheDJtbXVwdDA4aDNyaCJ9.nbvz6aNGQo68xa4NtWH26A';
         const map = new mapboxgl.Map({
@@ -37,8 +71,8 @@
             hash: true
         });
 
-                // Add geocoder control
-                const geocoder = new MapboxGeocoder({
+        // Add geocoder control
+        const geocoder = new MapboxGeocoder({
             accessToken: mapboxgl.accessToken,
             mapboxgl: mapboxgl
         });
@@ -53,8 +87,6 @@
         });
         map.addControl(geolocate, 'top-right');
 
-
-
         const urlParams = new URLSearchParams(window.location.search);
         const sheetId = urlParams.get('sheetId');
 
@@ -62,6 +94,8 @@
             console.error('No sheet ID provided in URL parameters');
         } else {
             const sheetUrl = `https://docs.google.com/spreadsheets/d/e/${sheetId}/pub?single=true&output=csv`;
+            const viewSheetDataButton = document.getElementById('viewSheetData');
+            viewSheetDataButton.href = `https://docs.google.com/spreadsheets/d/e/${sheetId}/pubhtml`;
 
             map.on('load', () => {
                 Papa.parse(sheetUrl, {
@@ -89,7 +123,7 @@
                             });
                         }
 
-                        data.forEach(row => {
+                        data.forEach((row, index) => {
                             const lon = parseFloat(row.Longitude);
                             const lat = parseFloat(row.Latitude);
                             if (!isNaN(lon) && !isNaN(lat) && 
@@ -109,6 +143,8 @@
                                             break;
                                     }
                                 });
+                                // Add row_number field
+                                row.row_number = index + 2; // Start from 2 to match Google Sheet row
                                 validRows.push(row);
                             } else {
                                 invalidRows.push(row);
@@ -124,17 +160,21 @@
                                 type: 'Feature',
                                 geometry: {
                                     type: 'Point',
-                                    coordinates: [row.Longitude, row.Latitude]
+                                    coordinates: [parseFloat(row.Longitude), parseFloat(row.Latitude)]
                                 },
                                 properties: row
                             }))
                         };
 
+                        // Add a geojson data source to the map and generate unique ids for each feature
+                        // The ids are used to link the features to the sidebar items
                         map.addSource('deals', {
                             type: 'geojson',
-                            data: geojson
+                            data: geojson,
+                            promoteId: 'row_number'
                         });
 
+                        // Add a layer to the map to render the point features as circles
                         map.addLayer({
                             id: 'deals',
                             type: 'circle',
@@ -159,60 +199,36 @@
                             }
                         });
 
-                        // Add center marker
-                        const centerMarker = new mapboxgl.Marker({ color: '#000000' })
-                            .setLngLat(map.getCenter())
-                            .addTo(map);
-
                         function updateSidebar() {
-                            const center = map.getCenter();
-                            const features = map.queryRenderedFeatures({ layers: ['deals'] });
-                            
-                            // Calculate distances and sort
-                            const sortedFeatures = features.map(f => ({
-                                ...f,
-                                distance: turf.distance(
-                                    turf.point([center.lng, center.lat]),
-                                    turf.point(f.geometry.coordinates)
-                                )
-                            })).sort((a, b) => a.distance - b.distance).slice(0, 5);
-
-                            // Update sidebar
                             const sidebar = document.getElementById('sidebar');
-                            sidebar.innerHTML = '<h2 class="text-lg font-bold mb-4">Nearest Locations</h2>';
-                            sortedFeatures.forEach(f => {
+                            sidebar.innerHTML = '<h2 class="text-lg font-bold mb-4">All Locations</h2>';
+                            validRows.forEach(row => {
                                 const div = document.createElement('div');
                                 div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item';
+                                div.setAttribute('data-lng', row.Longitude);
+                                div.setAttribute('data-lat', row.Latitude);
+                                div.setAttribute('data-row', row.row_number);
                                 div.innerHTML = `
-                                    <h3 class="font-bold">Distance: ${f.distance.toFixed(2)} km</h3>
-                                    <h4>${f.properties['name'] || 'N/A'}<h4>
-                                    <p>Address: ${f.properties['Address'] || 'N/A'}</p>
-                                    <p>Category: ${f.properties['Project Category'] || 'N/A'}</p>
-                                    <p>Amount: ${f.properties['Total Amount'] || 'N/A'}</p>
+                                    <h4>${row['name'] || 'N/A'}</h4>
+                                    <p>Address: ${row['Address'] || 'N/A'}</p>
+                                    <p>Category: ${row['Project Category'] || 'N/A'}</p>
+                                    <p>Amount: ${row['Total Amount'] || 'N/A'}</p>
                                 `;
-                                div.addEventListener('mouseenter', () => {
-                                    map.flyTo({
-                                        center: f.geometry.coordinates,
-                                        zoom: 12
-                                    });
-                                });
                                 div.addEventListener('click', () => {
-                                    map.flyTo({
-                                        center: f.geometry.coordinates,
-                                        zoom: 14
-                                    });
+                                    const lng = parseFloat(div.getAttribute('data-lng'));
+                                    const lat = parseFloat(div.getAttribute('data-lat'));
+                                    if (!isNaN(lng) && !isNaN(lat)) {
+                                        map.flyTo({
+                                            center: [lng, lat],
+                                            zoom: 14
+                                        });
+                                    }
                                 });
                                 sidebar.appendChild(div);
                             });
                         }
 
-                        // Update on map move
-                        map.on('moveend', () => {
-                            centerMarker.setLngLat(map.getCenter());
-                            updateSidebar();
-                        });
-
-                        // Initial update
+                        // Update sidebar as soon as data loads
                         updateSidebar();
 
                         map.on('click', 'deals', (e) => {
