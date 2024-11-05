@@ -121,6 +121,7 @@ if (!sheetId) {
             const filterPanel = new MapboxGLFilterPanel({
                 geojson: geojson,
                 containerId: 'filterContainer',
+                sidebarId: 'sidebar',
                 map: map,
                 layerId: 'sheet-data',
                 numFields: 4
@@ -129,10 +130,18 @@ if (!sheetId) {
             // Listen for filter changes
             document.getElementById('filterContainer').addEventListener('filterchange', (event) => {
                 const filteredGeojson = event.detail.filteredGeojson;
-                // Update the source data with filtered GeoJSON
-                map.getSource('sheet-data').setData(filteredGeojson);
+                const hasActiveFilters = Object.values(event.detail.filters).some(value => value !== '');
+                
+                if (!hasActiveFilters && !event.detail.useMapBounds) {
+                    // If no filters are active, use the original source data
+                    map.getSource('sheet-data').setData(geojson);
+                } else {
+                    // Update the source data with filtered GeoJSON
+                    map.getSource('sheet-data').setData(filteredGeojson);
+                }
+                
                 // Update sidebar with filtered data
-                updateSidebar();
+                updateSidebar(event.detail.filteredGeojson.features);
             });
 
             // Wait for both source and layer to be ready
@@ -168,156 +177,165 @@ function getDirectionalArrow(bearing) {
 }
 
 // Update sidebar function
-function updateSidebar() {
+function updateSidebar(features) {
     if (!map.getLayer('sheet-data')) {
         console.log('Sheet data layer not yet loaded');
         return;
     }
 
-    const bounds = map.getBounds();
     const mapCenter = map.getCenter();
     const origin = turf.point([mapCenter.lng, mapCenter.lat]);
 
-    // Get visible features from the current map view
-    let visibleFeatures = map.querySourceFeatures('sheet-data', {
-        filter: ['all',
-            ['>=', ['get', 'Longitude'], bounds.getWest()],
-            ['<=', ['get', 'Longitude'], bounds.getEast()],
-            ['>=', ['get', 'Latitude'], bounds.getSouth()],
-            ['<=', ['get', 'Latitude'], bounds.getNorth()]
-        ]
+    // Sort features by distance from map center
+    features.sort((a, b) => {
+        const pointA = turf.point(a.geometry.coordinates);
+        const pointB = turf.point(b.geometry.coordinates);
+        const distanceA = turf.distance(origin, pointA);
+        const distanceB = turf.distance(origin, pointB);
+        return distanceA - distanceB;
     });
 
-    // Remove duplicates based on row_number
-    visibleFeatures = [...new Map(visibleFeatures.map(feat => 
-        [feat.properties.row_number, feat]
-    )).values()];
+    const sidebar = document.getElementById('sidebar');
+    sidebar.innerHTML = `
+        <div class="sticky top-0 bg-white p-4 border-b">
+            <h2 class="text-lg font-bold">Nearest Locations (${features.length})</h2>
+        </div>
+        <div class="p-4">
+    `;
 
-    if (visibleFeatures) {
-        visibleFeatures.sort((a, b) => {
-            const pointA = turf.point(a.geometry.coordinates);
-            const pointB = turf.point(b.geometry.coordinates);
-            const distanceA = turf.distance(origin, pointA);
-            const distanceB = turf.distance(origin, pointB);
-            return distanceA - distanceB;
-        });
-
-        const sidebar = document.getElementById('sidebar');
-        sidebar.innerHTML = `<h2 class="text-lg font-bold mb-4">Visible Locations (${visibleFeatures.length})</h2>`;
+    features.forEach(feature => {
+        const props = feature.properties;
+        const coords = feature.geometry.coordinates;
         
-        visibleFeatures.forEach(feature => {
-            const props = feature.properties;
-            const coords = feature.geometry.coordinates;
-            
-            const circleRadius = props['circle-radius'] || 3;
-            const circleColor = props['circle-color'] || 'grey';
-            
-            const destination = turf.point(coords);
-            const distance = turf.distance(origin, destination, {units: 'kilometers'});
-            const formattedDistance = distance < 1 
-                ? `${Math.round(distance * 1000)} m` 
-                : `${Math.round(distance * 10) / 10} km`;
+        const circleRadius = props['circle-radius'] || 3;
+        const circleColor = props['circle-color'] || 'grey';
+        
+        const destination = turf.point(coords);
+        const distance = turf.distance(origin, destination, {units: 'kilometers'});
+        const formattedDistance = distance < 1 
+            ? `${Math.round(distance * 1000)} m` 
+            : `${Math.round(distance * 10) / 10} km`;
 
-            const rotatedArrow = distance < 0.01 ? '•' : getDirectionalArrow(turf.bearing(origin, destination));
+        const rotatedArrow = distance < 0.01 ? '•' : getDirectionalArrow(turf.bearing(origin, destination));
+        const div = document.createElement('div');
+        div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item hover:bg-gray-200 transition-colors duration-150';
+        div.setAttribute('data-lng', props.Longitude);
+        div.setAttribute('data-lat', props.Latitude);
+        div.setAttribute('data-row', props.row_number);
 
-            const div = document.createElement('div');
-            div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item hover:bg-gray-200 transition-colors duration-150';
-            div.setAttribute('data-lng', props.Longitude);
-            div.setAttribute('data-lat', props.Latitude);
-            div.setAttribute('data-row', props.row_number);
-            
-            div.innerHTML = `
-                <div class="flex justify-between items-start">
-                    <div class="flex items-center gap-2">
-                        <svg width="${circleRadius * 2 + 4}" height="${circleRadius * 2 + 4}" class="flex-shrink-0">
-                            <circle 
-                                cx="${circleRadius + 2}" 
-                                cy="${circleRadius + 2}" 
-                                r="${circleRadius}"
-                                fill="${circleColor}"
-                                stroke="white"
-                                stroke-width="2"
-                            />
-                        </svg>
-                        <h4>${props['name'] || 'N/A'}</h4>
-                    </div>
-                    <span class="text-sm text-gray-600">
-                        ${rotatedArrow} ${formattedDistance} away
-                    </span>
+        // Get the first four fields dynamically
+        const fields = Object.keys(props).slice(0, 4);
+
+        let innerHTML = `
+            <div class="flex justify-between items-start">
+                <div class="flex items-center gap-2">
+                    <svg width="${circleRadius * 4 + 8}" height="${circleRadius * 4 + 8}" class="flex-shrink-0">
+                        <circle 
+                            cx="${circleRadius * 2 + 4}" 
+                            cy="${circleRadius * 2 + 4}" 
+                            r="${circleRadius * 2}"
+                            fill="${circleColor}"
+                            stroke="white"
+                            stroke-width="2"
+                        />
+                    </svg>
+                    <h4 class="text-lg">${props[fields[0]] || 'N/A'}</h4>
                 </div>
-                <p>Address: ${props['Address'] || 'N/A'}</p>
-                <p>Category: ${props['Project Category'] || 'N/A'}</p>
-                <p>Amount: ${props['Total Amount'] || 'N/A'}</p>
-            `;
+                <span class="text-sm text-gray-600">
+                    ${rotatedArrow} ${formattedDistance} away
+                </span>
+            </div>
+        `;
+
+        // Add the next three fields dynamically
+        for (let i = 1; i < 4 && i < fields.length; i++) {
+            innerHTML += `<p>${fields[i]}: ${props[fields[i]] || 'N/A'}</p>`;
+        }
+
+        innerHTML += `
+            <div class="mt-2 flex gap-2 text-sm">
+                ${props.url ? `
+                    <a href="${props.url}" target="_blank" class="text-blue-600 hover:text-blue-800">
+                        Open
+                    </a>
+                ` : ''}
+                <a href="https://www.google.com/maps/search/?api=1&query=${props.Latitude},${props.Longitude}" 
+                   target="_blank" 
+                   class="text-blue-600 hover:text-blue-800">
+                    View in Google Maps
+                </a>
+            </div>
+        `;
+
+        div.innerHTML = innerHTML;
+        
+        div.addEventListener('click', () => {
+            const lng = parseFloat(div.getAttribute('data-lng'));
+            const lat = parseFloat(div.getAttribute('data-lat'));
+            const rowNumber = parseInt(div.getAttribute('data-row'));
             
-            div.addEventListener('click', () => {
-                const lng = parseFloat(div.getAttribute('data-lng'));
-                const lat = parseFloat(div.getAttribute('data-lat'));
-                const rowNumber = parseInt(div.getAttribute('data-row'));
-                
-                if (!isNaN(lng) && !isNaN(lat)) {
-                    // Clear previous selection
-                    if (selectedStateId !== null) {
-                        map.setFeatureState(
-                            { source: 'sheet-data', id: selectedStateId },
-                            { selected: false }
-                        );
-                        const prevSelected = document.querySelector('.sidebar-item.selected');
-                        if (prevSelected) prevSelected.classList.remove('selected');
-                    }
-                    
-                    // Set new selection
-                    selectedStateId = rowNumber;
+            if (!isNaN(lng) && !isNaN(lat)) {
+                // Clear previous selection
+                if (selectedStateId !== null) {
                     map.setFeatureState(
                         { source: 'sheet-data', id: selectedStateId },
-                        { selected: true }
+                        { selected: false }
                     );
-                    div.classList.add('selected');
-                    
-                    map.flyTo({
-                        center: [lng, lat],
-                        zoom: 14
-                    });
+                    const prevSelected = document.querySelector('.sidebar-item.selected');
+                    if (prevSelected) prevSelected.classList.remove('selected');
                 }
-            });
+                
+                // Set new selection
+                selectedStateId = rowNumber;
+                map.setFeatureState(
+                    { source: 'sheet-data', id: selectedStateId },
+                    { selected: true }
+                );
+                div.classList.add('selected');
+                
+                map.flyTo({
+                    center: [lng, lat],
+                    zoom: 14
+                });
+            }
+        });
 
-            div.addEventListener('mouseenter', () => {
-                const rowNumber = parseInt(div.getAttribute('data-row'));
-                if (!isNaN(rowNumber)) {
-                    if (hoveredStateId !== null) {
-                        map.setFeatureState(
-                            { source: 'sheet-data', id: hoveredStateId },
-                            { hover: false }
-                        );
-                    }
-                    hoveredStateId = rowNumber;
-                    map.setFeatureState(
-                        { source: 'sheet-data', id: hoveredStateId },
-                        { hover: true }
-                    );
-                }
-            });
-
-            div.addEventListener('mouseleave', () => {
+        div.addEventListener('mouseenter', () => {
+            const rowNumber = parseInt(div.getAttribute('data-row'));
+            if (!isNaN(rowNumber)) {
                 if (hoveredStateId !== null) {
                     map.setFeatureState(
                         { source: 'sheet-data', id: hoveredStateId },
                         { hover: false }
                     );
-                    hoveredStateId = null;
                 }
-            });
-
-            sidebar.appendChild(div);
+                hoveredStateId = rowNumber;
+                map.setFeatureState(
+                    { source: 'sheet-data', id: hoveredStateId },
+                    { hover: true }
+                );
+            }
         });
 
-        // Animate scroll to top of the sidebar
-        sidebar.scrollTo({
-            top: 0,
-            behavior: 'smooth',
-            duration: 500
+        div.addEventListener('mouseleave', () => {
+            if (hoveredStateId !== null) {
+                map.setFeatureState(
+                    { source: 'sheet-data', id: hoveredStateId },
+                    { hover: false }
+                );
+                hoveredStateId = null;
+            }
         });
-    }
+
+        sidebar.appendChild(div);
+    });
+
+    // Animate scroll to top of the sidebar
+    sidebar.scrollTo({
+        top: 0,
+        behavior: 'smooth',
+        duration: 500
+    });
 }
 
 // Map event listeners
