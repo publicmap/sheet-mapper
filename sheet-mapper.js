@@ -62,6 +62,35 @@ if (!sheetId) {
                 promoteId: 'row_number'
             });
 
+
+            map.addLayer({
+                id: 'sheet-data-stroke',
+                type: 'circle',
+                source: 'sheet-data',
+                paint: {
+                    'circle-radius': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
+                        16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
+                    ],
+                    'circle-stroke-width': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        10,
+                        1
+                    ],
+                    'circle-stroke-color': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        'yellow',
+                        '#000000'
+                    ],
+                    'circle-color': 'rgba(0, 0, 0, 0)'
+                }
+            }, 'waterway-label');
+
             map.addLayer({
                 id: 'sheet-data',
                 type: 'circle',
@@ -84,36 +113,9 @@ if (!sheetId) {
                 }
             }, 'waterway-label');
 
-            map.addLayer({
-                id: 'sheet-data-stroke',
-                type: 'circle',
-                source: 'sheet-data',
-                paint: {
-                    'circle-radius': [
-                        'interpolate',
-                        ['linear'],
-                        ['zoom'],
-                        10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
-                        16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
-                    ],
-                    'circle-stroke-width': [
-                        'case',
-                        ['boolean', ['feature-state', 'hover'], false],
-                        10,
-                        2
-                    ],
-                    'circle-stroke-color': [
-                        'case',
-                        ['boolean', ['feature-state', 'hover'], false],
-                        '#000000',
-                        '#ffffff'
-                    ],
-                    'circle-color': 'rgba(0, 0, 0, 0)'
-                }
-            });
 
             // Add transition for circle-stroke-width
-            map.setPaintProperty('sheet-data', 'circle-stroke-opacity-transition', {
+            map.setPaintProperty('sheet-data', 'circle-stroke-width-transition', {
                 duration: 1000,
             });
 
@@ -206,12 +208,6 @@ function updateSidebar(features) {
     });
 
     const sidebar = document.getElementById('sidebar');
-    sidebar.innerHTML = `
-        <div class="sticky top-0 bg-white p-4 border-b">
-            <h2 class="text-lg font-bold">Nearest Locations (${features.length})</h2>
-        </div>
-        <div class="p-4">
-    `;
 
     features.forEach(feature => {
         const props = feature.properties;
@@ -237,48 +233,90 @@ function updateSidebar(features) {
         const fields = Object.keys(props).slice(0, 4);
 
         let innerHTML = `
-            <div class="flex justify-between items-start">
-                <div class="flex items-center gap-2">
-                    <svg width="${circleRadius * 4 + 8}" height="${circleRadius * 4 + 8}" class="flex-shrink-0">
-                        <circle 
-                            cx="${circleRadius * 2 + 4}" 
-                            cy="${circleRadius * 2 + 4}" 
-                            r="${circleRadius * 2}"
-                            fill="${circleColor}"
-                            stroke="white"
-                            stroke-width="2"
-                        />
-                    </svg>
-                    <h4 class="text-lg">${props[fields[0]] || 'N/A'}</h4>
+            <div class="flex flex-col gap-2">
+                <!-- Header with icon and distance -->
+                <div class="flex justify-between items-start">
+                    <div class="flex items-center gap-2">
+                        <svg width="${circleRadius * 4 + 8}" height="${circleRadius * 4 + 8}" class="flex-shrink-0">
+                            <circle 
+                                cx="${circleRadius * 2 + 4}" 
+                                cy="${circleRadius * 2 + 4}" 
+                                r="${circleRadius * 2}"
+                                fill="${circleColor}"
+                                stroke="white"
+                                stroke-width="2"
+                            />
+                        </svg>
+                        <h4 class="font-semibold text-lg">${props[fields[0]] || 'N/A'}</h4>
+                    </div>
+                    <span class="text-sm text-gray-500 font-medium">
+                        ${rotatedArrow} ${formattedDistance}
+                    </span>
                 </div>
-                <span class="text-sm text-gray-600">
-                    ${rotatedArrow} ${formattedDistance} away
-                </span>
-            </div>
-        `;
 
-        // Add the next three fields dynamically
-        for (let i = 1; i < 4 && i < fields.length; i++) {
-            innerHTML += `<p>${fields[i]}: ${props[fields[i]] || 'N/A'}</p>`;
-        }
+                <!-- Primary Fields -->
+                <div class="space-y-1">
+                    ${fields.slice(1, 4).map(field => `
+                        <div class="flex items-baseline">
+                            <span class="text-gray-500 text-sm w-24 flex-shrink-0">${field}:</span>
+                            <span class="text-gray-900">${props[field] || 'N/A'}</span>
+                        </div>
+                    `).join('')}
+                </div>
 
-        innerHTML += `
-            <div class="mt-2 flex gap-2 text-sm">
-                ${props.url ? `
-                    <a href="${props.url}" target="_blank" class="text-blue-600 hover:text-blue-800">
-                        Open
-                    </a>
-                ` : ''}
-                <a href="https://www.google.com/maps/search/?api=1&query=${props.Latitude},${props.Longitude}" 
-                   target="_blank" 
-                   class="text-blue-600 hover:text-blue-800">
-                    View in Google Maps
-                </a>
+                <!-- Hidden Fields (Initially Hidden) -->
+                <div class="hidden space-y-1 pt-2 border-t" data-expanded-fields>
+                    ${Object.entries(props)
+                        .filter(([key]) => !fields.slice(0, 4).includes(key) && !['row_number', 'circle-color', 'circle-radius'].includes(key))
+                        .map(([key, value]) => `
+                            <div class="flex items-baseline">
+                                <span class="text-gray-500 text-sm w-24 flex-shrink-0">${key}:</span>
+                                <span class="text-gray-900">${value || 'N/A'}</span>
+                            </div>
+                        `).join('')}
+                </div>
+
+                <!-- Actions -->
+                <div class="flex gap-2 mt-1 text-sm">
+                    <button class="text-blue-600 hover:text-blue-800 font-medium" data-expand-btn>
+                        View All Details
+                    </button>
+                    ${props.url ? `
+                        <a href="${props.url}" target="_blank" class="text-blue-600 hover:text-blue-800 font-medium">
+                            Open Link
+                        </a>
+                    ` : ''}
+                    ${props.Address || props.address ? `
+                        <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(props.Address || props.address)}" 
+                           target="_blank"
+                           class="text-blue-600 hover:text-blue-800 font-medium">
+                            Directions
+                        </a>
+                    ` : `
+                        <a href="https://www.google.com/maps/search/?api=1&query=${props.Latitude},${props.Longitude}" 
+                           target="_blank" 
+                           class="text-blue-600 hover:text-blue-800 font-medium">
+                            Directions
+                        </a>
+                    `}
+                </div>
             </div>
         `;
 
         div.innerHTML = innerHTML;
-        
+
+        // Add expand/collapse functionality
+        const expandBtn = div.querySelector('[data-expand-btn]');
+        const expandedFields = div.querySelector('[data-expanded-fields]');
+        if (expandBtn && expandedFields) {
+            expandBtn.addEventListener('click', () => {
+                expandedFields.classList.toggle('hidden');
+                expandBtn.textContent = expandedFields.classList.contains('hidden') 
+                    ? 'View All Details' 
+                    : 'Show Less';
+            });
+        }
+
         div.addEventListener('click', () => {
             const lng = parseFloat(div.getAttribute('data-lng'));
             const lat = parseFloat(div.getAttribute('data-lat'));
