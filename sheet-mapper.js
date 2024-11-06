@@ -180,6 +180,11 @@ function getDirectionalArrow(bearing) {
 
 // Update sidebar function
 function updateSidebar(features) {
+    const sidebar = document.getElementById('sidebar');
+    
+    // Clear existing content
+    sidebar.innerHTML = '';
+    
     if (!map.getLayer('sheet-data')) {
         console.log('Sheet data layer not yet loaded');
         return;
@@ -188,11 +193,17 @@ function updateSidebar(features) {
     // If features not provided, get all features from the source
     if (!features) {
         const source = map.getSource('sheet-data');
-        if (!source) return;
-        
-        // Get the current source data
-        const sourceData = source._data;
-        features = sourceData.features;
+        if (!source || !source._data) {
+            console.log('No source data available');
+            return;
+        }
+        features = source._data.features;
+    }
+
+    // Ensure features is an array and not empty
+    if (!Array.isArray(features) || features.length === 0) {
+        sidebar.innerHTML = '<div class="p-4">No locations found</div>';
+        return;
     }
 
     const mapCenter = map.getCenter();
@@ -206,8 +217,6 @@ function updateSidebar(features) {
         const distanceB = turf.distance(origin, pointB);
         return distanceA - distanceB;
     });
-
-    const sidebar = document.getElementById('sidebar');
 
     features.forEach(feature => {
         const props = feature.properties;
@@ -387,7 +396,14 @@ function updateSidebar(features) {
 }
 
 // Map event listeners
-map.on('moveend', updateSidebar);
+map.on('moveend', () => {
+    const source = map.getSource('sheet-data');
+    if (source && source._data) {
+        updateSidebar(source._data.features);
+    } else {
+        updateSidebar([]);
+    }
+});
 
 // Hover state handling
 let hoveredStateId = null;
@@ -443,34 +459,6 @@ map.on('mousemove', (e) => {
             }]
         });
         
-        const sidebarItem = document.querySelector(`[data-row="${hoveredStateId}"]`);
-        if (sidebarItem) {
-            // Remove highlight from all items first
-            document.querySelectorAll('.sidebar-item').forEach(item => {
-                item.classList.remove('bg-gray-200');
-            });
-            
-            // Add highlight to current item
-            sidebarItem.classList.add('bg-gray-200');
-            
-            // Get the sidebar element
-            const sidebar = document.getElementById('sidebar');
-            
-            // Calculate scroll position
-            const itemTop = sidebarItem.offsetTop;
-            const sidebarScrollTop = sidebar.scrollTop;
-            const sidebarHeight = sidebar.clientHeight;
-            const itemHeight = sidebarItem.clientHeight;
-            
-            // Only scroll if item is not fully visible
-            if (itemTop < sidebarScrollTop || itemTop + itemHeight > sidebarScrollTop + sidebarHeight) {
-                sidebar.scrollTo({
-                    top: itemTop - (sidebarHeight / 2) + (itemHeight / 2),
-                    behavior: 'auto',
-                    duration: 50
-                });
-            }
-        }
     } else {
         // Reset hover line data if there are no nearby features
         map.getSource('hover-line').setData({
