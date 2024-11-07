@@ -1,6 +1,7 @@
 // At the top of the file, import the config
 import { config } from './config.js';
 import MapboxGLFilterPanel from './mapbox-gl-filter-panel.js';
+import MapboxGLFeatureStateManager from './mapbox-gl-feature-state-manager.js';
 
 mapboxgl.accessToken = config.mapboxgl.accessToken;
 // Replace the map initialization with the config object
@@ -47,6 +48,9 @@ if (!sheetId) {
             }
         });
 
+        // Initialize the state manager
+        const stateManager = new MapboxGLFeatureStateManager(map, 'sheet-data');
+
         try {
             const converter = new SheetToGeoJSON();
             const geojson = await converter.fromSheetId(sheetId);
@@ -61,7 +65,6 @@ if (!sheetId) {
                 data: geojson,
                 promoteId: 'row_number'
             });
-
 
             map.addLayer({
                 id: 'sheet-data-stroke',
@@ -113,11 +116,23 @@ if (!sheetId) {
                 }
             }, 'waterway-label');
 
-
             // Add transition for circle-stroke-width
             map.setPaintProperty('sheet-data', 'circle-stroke-width-transition', {
                 duration: 1000,
             });
+
+            // Initialize paint properties for the layer
+            stateManager.updatePaintProperties('sheet-data-stroke', {
+                hoverColor: 'yellow',
+                selectedColor: 'blue',
+                defaultColor: '#000000',
+                hoverWidth: 10,
+                selectedWidth: 12,
+                defaultWidth: 1
+            });
+
+            // Make stateManager available to event handlers
+            window.stateManager = stateManager;
 
             // Initialize filter panel
             const filterPanel = new MapboxGLFilterPanel({
@@ -332,22 +347,10 @@ function updateSidebar(features) {
             const rowNumber = parseInt(div.getAttribute('data-row'));
             
             if (!isNaN(lng) && !isNaN(lat)) {
-                // Clear previous selection
-                if (selectedStateId !== null) {
-                    map.setFeatureState(
-                        { source: 'sheet-data', id: selectedStateId },
-                        { selected: false }
-                    );
-                    const prevSelected = document.querySelector('.sidebar-item.selected');
-                    if (prevSelected) prevSelected.classList.remove('selected');
-                }
+                stateManager.setSelected(rowNumber);
                 
-                // Set new selection
-                selectedStateId = rowNumber;
-                map.setFeatureState(
-                    { source: 'sheet-data', id: selectedStateId },
-                    { selected: true }
-                );
+                const prevSelected = document.querySelector('.sidebar-item.selected');
+                if (prevSelected) prevSelected.classList.remove('selected');
                 div.classList.add('selected');
                 
                 map.flyTo({
@@ -360,28 +363,12 @@ function updateSidebar(features) {
         div.addEventListener('mouseenter', () => {
             const rowNumber = parseInt(div.getAttribute('data-row'));
             if (!isNaN(rowNumber)) {
-                if (hoveredStateId !== null) {
-                    map.setFeatureState(
-                        { source: 'sheet-data', id: hoveredStateId },
-                        { hover: false }
-                    );
-                }
-                hoveredStateId = rowNumber;
-                map.setFeatureState(
-                    { source: 'sheet-data', id: hoveredStateId },
-                    { hover: true }
-                );
+                stateManager.setHovered(rowNumber);
             }
         });
 
         div.addEventListener('mouseleave', () => {
-            if (hoveredStateId !== null) {
-                map.setFeatureState(
-                    { source: 'sheet-data', id: hoveredStateId },
-                    { hover: false }
-                );
-                hoveredStateId = null;
-            }
+            stateManager.setHovered(null);
         });
 
         sidebar.appendChild(div);
@@ -429,22 +416,9 @@ map.on('mousemove', (e) => {
             }
         });
 
-        const newHoveredStateId = closestFeature.properties.row_number;
+        stateManager.setHovered(closestFeature.properties.row_number);
         
-        if (hoveredStateId !== newHoveredStateId) {
-            if (hoveredStateId !== null) {
-                map.setFeatureState(
-                    { source: 'sheet-data', id: hoveredStateId },
-                    { hover: false }
-                );
-            }
-            hoveredStateId = newHoveredStateId;
-            map.setFeatureState(
-                { source: 'sheet-data', id: hoveredStateId },
-                { hover: true }
-            );
-        }
-        
+        // Update hover line
         const mouseCoords = [e.lngLat.lng, e.lngLat.lat];
         const closestPoint = closestFeature.geometry.coordinates;
         
@@ -458,37 +432,17 @@ map.on('mousemove', (e) => {
                 }
             }]
         });
-        
     } else {
-        // Reset hover line data if there are no nearby features
+        stateManager.setHovered(null);
         map.getSource('hover-line').setData({
             type: 'FeatureCollection',
             features: []
-        });
-        
-        if (hoveredStateId !== null) {
-            map.setFeatureState(
-                { source: 'sheet-data', id: hoveredStateId },
-                { hover: false }
-            );
-            hoveredStateId = null;
-        }
-        
-        // Remove highlight from all items when no feature is hovered
-        document.querySelectorAll('.sidebar-item').forEach(item => {
-            item.classList.remove('bg-gray-200');
         });
     }
 });
 
 map.on('mouseleave', 'sheet-data', () => {
-    if (hoveredStateId !== null) {
-        map.setFeatureState(
-            { source: 'sheet-data', id: hoveredStateId },
-            { hover: false }
-        );
-        hoveredStateId = null;
-    }
+    stateManager.setHovered(null);
 });
 
 // Click handling for sheet-data layer
@@ -497,38 +451,16 @@ map.on('click', 'sheet-data', (e) => {
     const properties = e.features[0].properties;
     const rowNumber = properties.row_number;
 
-    // Clear previous selection
-    if (selectedStateId !== null) {
-        map.setFeatureState(
-            { source: 'sheet-data', id: selectedStateId },
-            { selected: false }
-        );
-        const prevSelected = document.querySelector('.sidebar-item.selected');
-        if (prevSelected) prevSelected.classList.remove('selected');
-    }
-
-    // Set new selection
-    selectedStateId = rowNumber;
-    map.setFeatureState(
-        { source: 'sheet-data', id: selectedStateId },
-        { selected: true }
-    );
+    stateManager.setSelected(rowNumber);
+    
+    const prevSelected = document.querySelector('.sidebar-item.selected');
+    if (prevSelected) prevSelected.classList.remove('selected');
     
     const sidebarItem = document.querySelector(`[data-row="${rowNumber}"]`);
     if (sidebarItem) {
         sidebarItem.classList.add('selected');
         sidebarItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-
-    // Update the sheet-data-stroke layer to show selected state
-    map.setPaintProperty('sheet-data-stroke', 'circle-stroke-width', [
-        'case',
-        ['boolean', ['feature-state', 'selected'], false],
-        12,
-        ['boolean', ['feature-state', 'hover'], false],
-        10,
-        2
-    ]);
 
     // Show popup
     let popupContent = '<div style="max-height: 300px; overflow-y: auto;"><table class="min-w-full divide-y divide-gray-200 text-xs">';

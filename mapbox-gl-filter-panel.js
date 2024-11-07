@@ -1,3 +1,18 @@
+/**
+ * MapboxGLFilterPanel - A customizable filter panel for Mapbox GL JS
+ * 
+ * This class creates an interactive filter interface for GeoJSON data displayed on a Mapbox map.
+ * Features include:
+ * - Dynamic filter creation based on GeoJSON properties
+ * - Map bounds filtering
+ * - Sidebar with sorted locations by distance from map center
+ * - Interactive hover and selection states
+ * - Directional indicators and distance calculations
+ * - Custom event dispatching for filter changes
+ * 
+ * @requires turf.js for geospatial calculations
+ */
+
 class MapboxGLFilterPanel {
     constructor(options) {
         this.options = {
