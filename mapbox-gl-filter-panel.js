@@ -183,13 +183,59 @@ class MapboxGLFilterPanel {
     }
 
     updateSidebar(geojson) {
+        console.log('FilterPanel updateSidebar called with features:', geojson.features.length); // Debug log
         const sidebar = document.getElementById(this.options.sidebarId);
-        if (!sidebar) return;
+        if (!sidebar) {
+            console.error('Sidebar element not found:', this.options.sidebarId);
+            return;
+        }
+
+        // Create tabs container with updated styling
+        sidebar.innerHTML = `
+            <div class="sticky top-0 bg-white border-b z-10">
+                <div class="flex justify-between items-center p-4">
+                    <h2 class="text-lg font-bold">Locations (${geojson.features.length})</h2>
+                </div>
+                <div class="flex border-b">
+                    <button class="flex-1 py-2 px-4 text-sm font-medium border-b-2 tab-button active border-blue-500 text-blue-600" data-tab="selected">
+                        Selected
+                    </button>
+                    <button class="flex-1 py-2 px-4 text-sm font-medium border-b-2 tab-button border-transparent text-gray-500 hover:text-gray-700" data-tab="visible">
+                        Visible (${geojson.features.length})
+                    </button>
+                </div>
+            </div>
+            <div id="selected-tab" class="tab-content p-4"></div>
+            <div id="visible-tab" class="tab-content p-4 hidden"></div>
+        `;
+
+        // Add tab switching functionality with improved event handling
+        const tabButtons = sidebar.querySelectorAll('.tab-button');
+        tabButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                // Prevent default button behavior
+                e.preventDefault();
+                
+                // Update tab button styles
+                tabButtons.forEach(btn => {
+                    btn.classList.remove('active', 'border-blue-500', 'text-blue-600');
+                    btn.classList.add('border-transparent', 'text-gray-500');
+                });
+                
+                button.classList.add('active', 'border-blue-500', 'text-blue-600');
+                button.classList.remove('border-transparent', 'text-gray-500');
+
+                // Show/hide tab content
+                const tabContents = sidebar.querySelectorAll('.tab-content');
+                tabContents.forEach(content => content.classList.add('hidden'));
+                
+                const targetTab = sidebar.querySelector(`#${button.dataset.tab}-tab`);
+                targetTab.classList.remove('hidden');
+            });
+        });
 
         const mapCenter = this.options.map.getCenter();
         const origin = turf.point([mapCenter.lng, mapCenter.lat]);
-
-        // Ensure we have an array of features
         const features = Array.isArray(geojson.features) ? geojson.features : [];
 
         // Sort features by distance from map center
@@ -201,42 +247,58 @@ class MapboxGLFilterPanel {
             return distanceA - distanceB;
         });
 
-        sidebar.innerHTML = `
-            <div class="sticky top-0 bg-white p-4 border-b">
-                <h2 class="text-lg font-bold">Nearest Locations (${sortedFeatures.length})</h2>
-            </div>
-            <div class="p-4">
-        `;
-
+        // Update visible tab content
+        const visibleTab = sidebar.querySelector('#visible-tab');
+        visibleTab.innerHTML = ''; // Clear existing content
         sortedFeatures.forEach(feature => {
-            const props = feature.properties;
-            const coords = feature.geometry.coordinates;
-            
-            const circleRadius = props['circle-radius'] || 3;
-            const circleColor = props['circle-color'] || 'grey';
-            
-            const destination = turf.point(coords);
-            const distance = turf.distance(origin, destination, {units: 'kilometers'});
-            const formattedDistance = distance < 1 
-                ? `${Math.round(distance * 1000)} m` 
-                : `${Math.round(distance * 10) / 10} km`;
-
-            const rotatedArrow = distance < 0.01 ? '•' : this.getDirectionalArrow(turf.bearing(origin, destination));
-
-            const div = document.createElement('div');
-            div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item hover:bg-gray-200 transition-colors duration-150';
-            div.setAttribute('data-lng', props.Longitude);
-            div.setAttribute('data-lat', props.Latitude);
-            div.setAttribute('data-row', props.row_number);
-
-            // Get the first four fields dynamically
-            const fields = Object.keys(props).slice(0, 4);
-
-            div.innerHTML = this.createSidebarItemHTML(props, fields, circleRadius, circleColor, rotatedArrow, formattedDistance);
-            
-            this.addSidebarItemListeners(div);
-            sidebar.appendChild(div);
+            const itemDiv = this.createSidebarItem(feature, origin);
+            visibleTab.appendChild(itemDiv);
         });
+
+        // Update selected tab content
+        const selectedTab = sidebar.querySelector('#selected-tab');
+        selectedTab.innerHTML = ''; // Clear existing content
+        if (this.selectedStateId !== null) {
+            const selectedFeature = sortedFeatures.find(f => f.properties.row_number === this.selectedStateId);
+            if (selectedFeature) {
+                const itemDiv = this.createSidebarItem(selectedFeature, origin);
+                itemDiv.classList.add('selected');
+                selectedTab.appendChild(itemDiv);
+            } else {
+                selectedTab.innerHTML = '<p class="text-gray-500 p-4">No location selected</p>';
+            }
+        } else {
+            selectedTab.innerHTML = '<p class="text-gray-500 p-4">No location selected</p>';
+        }
+    }
+
+    createSidebarItem(feature, origin) {
+        console.log('Creating sidebar item for feature:', feature.properties); // Debug log
+        const props = feature.properties;
+        const coords = feature.geometry.coordinates;
+        
+        const circleRadius = props['circle-radius'] || 3;
+        const circleColor = props['circle-color'] || 'grey';
+        
+        const destination = turf.point(coords);
+        const distance = turf.distance(origin, destination, {units: 'kilometers'});
+        const formattedDistance = distance < 0.01 ? '0 m' : 
+            distance < 1 ? `${Math.round(distance * 1000)} m` : 
+            `${Math.round(distance * 10) / 10} km`;
+
+        const rotatedArrow = distance < 0.01 ? '•' : this.getDirectionalArrow(turf.bearing(origin, destination));
+
+        const div = document.createElement('div');
+        div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item hover:bg-gray-200 transition-colors duration-150';
+        div.setAttribute('data-lng', props.Longitude);
+        div.setAttribute('data-lat', props.Latitude);
+        div.setAttribute('data-row', props.row_number);
+
+        const fields = Object.keys(props).slice(0, 4);
+        div.innerHTML = this.createSidebarItemHTML(props, fields, circleRadius, circleColor, rotatedArrow, formattedDistance);
+        
+        this.addSidebarItemListeners(div);
+        return div;
     }
 
     createSidebarItemHTML(props, fields, circleRadius, circleColor, rotatedArrow, formattedDistance) {

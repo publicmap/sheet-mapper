@@ -135,7 +135,7 @@ if (!sheetId) {
             window.stateManager = stateManager;
 
             // Initialize filter panel
-            const filterPanel = new MapboxGLFilterPanel({
+            window.filterPanel = new MapboxGLFilterPanel({
                 geojson: geojson,
                 containerId: 'filterContainer',
                 sidebarId: 'sidebar',
@@ -143,6 +143,9 @@ if (!sheetId) {
                 layerId: 'sheet-data',
                 numFields: 4
             });
+
+            // Initial sidebar update
+            updateSidebar(geojson.features);
 
             // Listen for filter changes
             document.getElementById('filterContainer').addEventListener('filterchange', (event) => {
@@ -158,16 +161,17 @@ if (!sheetId) {
                 }
                 
                 // Update sidebar with filtered data
-                updateSidebar(event.detail.filteredGeojson.features);
+                updateSidebar(filteredGeojson.features);
             });
 
-            // Wait for both source and layer to be ready
+            // Update the checkSourceAndLayer function
             const checkSourceAndLayer = () => {
                 if (map.getSource('sheet-data') && 
                     map.getSource('sheet-data').loaded() && 
                     map.getLayer('sheet-data') && 
                     map.isStyleLoaded()) {
-                    updateSidebar();
+                    // Initial sidebar update with all features
+                    updateSidebar(geojson.features);
                 } else {
                     setTimeout(checkSourceAndLayer, 100);
                 }
@@ -195,199 +199,26 @@ function getDirectionalArrow(bearing) {
 
 // Update sidebar function
 function updateSidebar(features) {
-    const sidebar = document.getElementById('sidebar');
-    
-    // Clear existing content
-    sidebar.innerHTML = '';
-    
-    if (!map.getLayer('sheet-data')) {
-        console.log('Sheet data layer not yet loaded');
-        return;
+    console.log('Updating sidebar with features:', features?.length); // Debug log
+    if (window.filterPanel) {
+        const geojson = {
+            type: 'FeatureCollection',
+            features: features || []
+        };
+        window.filterPanel.updateSidebar(geojson);
+    } else {
+        console.error('Filter panel not initialized'); // Debug log
     }
-
-    // If features not provided, get all features from the source
-    if (!features) {
-        const source = map.getSource('sheet-data');
-        if (!source || !source._data) {
-            console.log('No source data available');
-            return;
-        }
-        features = source._data.features;
-    }
-
-    // Ensure features is an array and not empty
-    if (!Array.isArray(features) || features.length === 0) {
-        sidebar.innerHTML = '<div class="p-4">No locations found</div>';
-        return;
-    }
-
-    const mapCenter = map.getCenter();
-    const origin = turf.point([mapCenter.lng, mapCenter.lat]);
-
-    // Sort features by distance from map center
-    features.sort((a, b) => {
-        const pointA = turf.point(a.geometry.coordinates);
-        const pointB = turf.point(b.geometry.coordinates);
-        const distanceA = turf.distance(origin, pointA);
-        const distanceB = turf.distance(origin, pointB);
-        return distanceA - distanceB;
-    });
-
-    features.forEach(feature => {
-        const props = feature.properties;
-        const coords = feature.geometry.coordinates;
-        
-        const circleRadius = props['circle-radius'] || 3;
-        const circleColor = props['circle-color'] || 'grey';
-        
-        const destination = turf.point(coords);
-        const distance = turf.distance(origin, destination, {units: 'kilometers'});
-        const formattedDistance = distance < 1 
-            ? `${Math.round(distance * 1000)} m` 
-            : `${Math.round(distance * 10) / 10} km`;
-
-        const rotatedArrow = distance < 0.01 ? '•' : getDirectionalArrow(turf.bearing(origin, destination));
-        const div = document.createElement('div');
-        div.className = 'mb-4 p-2 bg-gray-100 rounded sidebar-item hover:bg-gray-200 transition-colors duration-150';
-        div.setAttribute('data-lng', props.Longitude);
-        div.setAttribute('data-lat', props.Latitude);
-        div.setAttribute('data-row', props.row_number);
-
-        // Get the first four fields dynamically
-        const fields = Object.keys(props).slice(0, 4);
-
-        let innerHTML = `
-            <div class="flex flex-col gap-2">
-                <!-- Header with icon and distance -->
-                <div class="flex justify-between items-start">
-                    <div class="flex items-center gap-2">
-                        <svg width="${circleRadius * 4 + 8}" height="${circleRadius * 4 + 8}" class="flex-shrink-0">
-                            <circle 
-                                cx="${circleRadius * 2 + 4}" 
-                                cy="${circleRadius * 2 + 4}" 
-                                r="${circleRadius * 2}"
-                                fill="${circleColor}"
-                                stroke="white"
-                                stroke-width="2"
-                            />
-                        </svg>
-                        <h4 class="font-semibold text-lg">${props[fields[0]] || 'N/A'}</h4>
-                    </div>
-                    <span class="text-sm text-gray-500 font-medium">
-                        ${rotatedArrow} ${formattedDistance}
-                    </span>
-                </div>
-
-                <!-- Primary Fields -->
-                <div class="space-y-1">
-                    ${fields.slice(1, 4).map(field => `
-                        <div class="flex items-baseline">
-                            <span class="text-gray-500 text-sm w-24 flex-shrink-0">${field}:</span>
-                            <span class="text-gray-900">${props[field] || 'N/A'}</span>
-                        </div>
-                    `).join('')}
-                </div>
-
-                <!-- Hidden Fields (Initially Hidden) -->
-                <div class="hidden space-y-1 pt-2 border-t" data-expanded-fields>
-                    ${Object.entries(props)
-                        .filter(([key]) => !fields.slice(0, 4).includes(key) && !['row_number', 'circle-color', 'circle-radius'].includes(key))
-                        .map(([key, value]) => `
-                            <div class="flex items-baseline">
-                                <span class="text-gray-500 text-sm w-24 flex-shrink-0">${key}:</span>
-                                <span class="text-gray-900">${value || 'N/A'}</span>
-                            </div>
-                        `).join('')}
-                </div>
-
-                <!-- Actions -->
-                <div class="flex gap-2 mt-1 text-sm">
-                    <button class="text-blue-600 hover:text-blue-800 font-medium" data-expand-btn>
-                        View All Details
-                    </button>
-                    ${props.url ? `
-                        <a href="${props.url}" target="_blank" class="text-blue-600 hover:text-blue-800 font-medium">
-                            Open Link
-                        </a>
-                    ` : ''}
-                    ${props.Address || props.address ? `
-                        <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(props.Address || props.address)}" 
-                           target="_blank"
-                           class="text-blue-600 hover:text-blue-800 font-medium">
-                            Directions
-                        </a>
-                    ` : `
-                        <a href="https://www.google.com/maps/search/?api=1&query=${props.Latitude},${props.Longitude}" 
-                           target="_blank" 
-                           class="text-blue-600 hover:text-blue-800 font-medium">
-                            Directions
-                        </a>
-                    `}
-                </div>
-            </div>
-        `;
-
-        div.innerHTML = innerHTML;
-
-        // Add expand/collapse functionality
-        const expandBtn = div.querySelector('[data-expand-btn]');
-        const expandedFields = div.querySelector('[data-expanded-fields]');
-        if (expandBtn && expandedFields) {
-            expandBtn.addEventListener('click', () => {
-                expandedFields.classList.toggle('hidden');
-                expandBtn.textContent = expandedFields.classList.contains('hidden') 
-                    ? 'View All Details' 
-                    : 'Show Less';
-            });
-        }
-
-        div.addEventListener('click', () => {
-            const lng = parseFloat(div.getAttribute('data-lng'));
-            const lat = parseFloat(div.getAttribute('data-lat'));
-            const rowNumber = parseInt(div.getAttribute('data-row'));
-            
-            if (!isNaN(lng) && !isNaN(lat)) {
-                stateManager.setSelected(rowNumber);
-                
-                const prevSelected = document.querySelector('.sidebar-item.selected');
-                if (prevSelected) prevSelected.classList.remove('selected');
-                div.classList.add('selected');
-                
-                map.flyTo({
-                    center: [lng, lat],
-                    zoom: 14
-                });
-            }
-        });
-
-        div.addEventListener('mouseenter', () => {
-            const rowNumber = parseInt(div.getAttribute('data-row'));
-            if (!isNaN(rowNumber)) {
-                stateManager.setHovered(rowNumber);
-            }
-        });
-
-        div.addEventListener('mouseleave', () => {
-            stateManager.setHovered(null);
-        });
-
-        sidebar.appendChild(div);
-    });
-
-    // Animate scroll to top of the sidebar
-    sidebar.scrollTo({
-        top: 0,
-        behavior: 'smooth',
-        duration: 500
-    });
 }
 
 // Map event listeners
 map.on('moveend', () => {
     const source = map.getSource('sheet-data');
     if (source && source._data) {
+        console.log('Map moved, updating sidebar with features:', source._data.features.length); // Debug log
         updateSidebar(source._data.features);
     } else {
+        console.log('Map moved, no features to update'); // Debug log
         updateSidebar([]);
     }
 });
