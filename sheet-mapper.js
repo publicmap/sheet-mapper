@@ -20,12 +20,22 @@ map.addControl(geolocate, 'top-right');
 
 const urlParams = new URLSearchParams(window.location.search);
 const sheetId = urlParams.get('sheetId');
+const dataFilter = urlParams.get('data_filter');
+const showHeader = urlParams.get('show_header') !== 'false'; // Default to true if not specified
 
 if (!sheetId) {
     console.error('No sheet ID provided in URL parameters');
 } else {
     const viewSheetDataButton = document.getElementById('viewSheetData');
     viewSheetDataButton.href = `https://docs.google.com/spreadsheets/d/e/${sheetId}/pubhtml`;
+
+    // Hide header if show_header is false
+    if (!showHeader) {
+        const header = document.querySelector('header');
+        if (header) {
+            header.style.display = 'none';
+        }
+    }
 
     map.on('load', async () => {
         // Add the hover line source and layer
@@ -134,14 +144,16 @@ if (!sheetId) {
             // Make stateManager available to event handlers
             window.stateManager = stateManager;
 
-            // Initialize filter panel
+            // Initialize filter panel with additional options
             window.filterPanel = new MapboxGLFilterPanel({
                 geojson: geojson,
                 containerId: 'filterContainer',
                 sidebarId: 'sidebar',
                 map: map,
                 layerId: 'sheet-data',
-                numFields: 4
+                numFields: 4,
+                predefinedFilter: dataFilter,
+                visible: showHeader // Pass the header visibility setting
             });
 
             // Initial sidebar update

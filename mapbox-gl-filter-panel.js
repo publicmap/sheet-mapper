@@ -22,6 +22,8 @@ class MapboxGLFilterPanel {
             map: null,
             layerId: null,
             numFields: 4,
+            predefinedFilter: null,
+            visible: true,
             ...options
         };
 
@@ -33,14 +35,37 @@ class MapboxGLFilterPanel {
     }
 
     init() {
-        // Get filter container
         this.filterContainer = document.getElementById(this.options.containerId);
         if (!this.filterContainer) {
             console.error('Filter container not found');
             return;
         }
 
+        if (!this.options.visible) {
+            this.filterContainer.style.display = 'none';
+        }
+
         this.createFilters();
+
+        if (this.options.predefinedFilter) {
+            this.applyPredefinedFilter(this.options.predefinedFilter);
+        }
+    }
+
+    applyPredefinedFilter(filterString) {
+        try {
+            const [field, value] = filterString.split('=').map(s => s.trim());
+            
+            const select = this.filters[field];
+            if (select) {
+                select.value = value;
+                this.applyFilters();
+            } else {
+                console.warn(`Filter field "${field}" not found`);
+            }
+        } catch (error) {
+            console.error('Error applying predefined filter:', error);
+        }
     }
 
     createFilters() {
