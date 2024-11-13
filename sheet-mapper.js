@@ -22,12 +22,33 @@ const urlParams = new URLSearchParams(window.location.search);
 const sheetId = urlParams.get('sheetId');
 const dataFilter = urlParams.get('data_filter');
 const showHeader = urlParams.get('show_header') !== 'false'; // Default to true if not specified
+const displayFields = urlParams.get('display_fields')?.split(',').map(f => f.trim()) || null;
 
 if (!sheetId) {
     console.error('No sheet ID provided in URL parameters');
 } else {
     const viewSheetDataButton = document.getElementById('viewSheetData');
     viewSheetDataButton.href = `https://docs.google.com/spreadsheets/d/e/${sheetId}/pubhtml`;
+
+    // Add download GeoJSON button functionality
+    const downloadGeoJSONButton = document.getElementById('downloadGeoJSON');
+    if (downloadGeoJSONButton) {
+        downloadGeoJSONButton.addEventListener('click', () => {
+            const source = map.getSource('sheet-data');
+            if (source && source._data) {
+                const dataStr = JSON.stringify(source._data, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'map-data.geojson';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            }
+        });
+    }
 
     // Hide header if show_header is false
     if (!showHeader) {
@@ -153,7 +174,8 @@ if (!sheetId) {
                 layerId: 'sheet-data',
                 numFields: 4,
                 predefinedFilter: dataFilter,
-                visible: showHeader // Pass the header visibility setting
+                visible: showHeader,
+                displayFields: displayFields
             });
 
             // Initial sidebar update
@@ -305,18 +327,16 @@ map.on('click', 'sheet-data', (e) => {
         sidebarItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    // Show popup
+    // Show popup with filtered properties
     let popupContent = '<div style="max-height: 300px; overflow-y: auto;"><table class="min-w-full divide-y divide-gray-200 text-xs">';
     
-    if (properties.url || properties.URL || properties.Url) {
-        const url = properties.url || properties.URL || properties.Url;
-        popupContent += `<tr><td colspan="2" class="px-2 py-1 whitespace-nowrap text-center"><a href="${url}" target="_blank" class="text-blue-500 hover:text-blue-700">View Details</a></td></tr>`;
-    }
-    
-    for (const [key, value] of Object.entries(properties)) {
-        if (key.toLowerCase() !== 'url') {
-            popupContent += `<tr><td class="px-2 py-1 whitespace-nowrap font-medium text-gray-900">${key}:</td><td class="px-2 py-1 whitespace-nowrap text-gray-500">${value}</td></tr>`;
-        }
+    // Filter and display properties
+    const propertiesToShow = displayFields 
+        ? Object.entries(properties).filter(([key]) => displayFields.includes(key))
+        : Object.entries(properties).filter(([key]) => key.toLowerCase() !== 'url');
+
+    for (const [key, value] of propertiesToShow) {
+        popupContent += `<tr><td class="px-2 py-1 whitespace-nowrap font-medium text-gray-900">${key}:</td><td class="px-2 py-1 whitespace-nowrap text-gray-500">${value}</td></tr>`;
     }
     popupContent += '</table></div>';
 

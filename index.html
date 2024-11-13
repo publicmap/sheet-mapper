@@ -20,7 +20,83 @@
 
     <style>
         body { margin: 0; padding: 0; }
-        #map { position: relative; height: calc(100vh - 120px); width: 100%; }
+        
+        /* Mobile-first layout */
+        .layout-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            flex-shrink: 0;
+            width: 100%;
+            /* Allow header to scroll horizontally on mobile */
+            overflow-x: auto;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        #sidebar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 30vh;
+            width: 100%;
+            z-index: 10;
+            transform: translateY(70%);
+            transition: transform 0.3s ease-out;
+        }
+
+        #sidebar.expanded {
+            transform: translateY(0);
+        }
+
+        .sidebar-handle {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 50px;
+            height: 5px;
+            background: #e5e7eb;
+            border-radius: 999px;
+            cursor: pointer;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        /* Tablet and desktop styles */
+        @media (min-width: 768px) {
+            .main-content {
+                flex-direction: row;
+            }
+
+            #sidebar {
+                position: relative;
+                width: 300px;
+                height: calc(100vh - 120px);
+                transform: none;
+            }
+
+            .sidebar-handle {
+                display: none;
+            }
+
+            #map {
+                flex: 1;
+            }
+        }
+
         #center-marker {
             position: absolute;
             top: 50%;
@@ -29,63 +105,35 @@
             pointer-events: none;
             z-index: 1;
         }
-        .tab-button {
-    position: relative;
-    transition: all 0.3s;
-}
-
-.tab-button.active {
-    border-bottom-color: #3b82f6;
-    color: #2563eb;
-}
-
-.tab-button:not(.active) {
-    border-bottom-color: transparent;
-    color: #6b7280;
-}
-
-.tab-button:hover:not(.active) {
-    color: #374151;
-}
-
-.tab-content {
-    transition: opacity 0.3s;
-}
-
-.sidebar-item.selected {
-    border-left: 4px solid #3b82f6;
-    background-color: #f3f4f6;
-}
     </style>
 </head>
-<body class="bg-gray-100">
-    <!-- Header -->
-    <header class="bg-white shadow-md p-4">
-        <div class="container mx-auto">
-            <!-- Sheet button row -->
-            <div class="mb-4">
-                <a id="viewSheetData" href="#" target="_blank" class="inline-block px-4 py-2 bg-blue-500 text-white font-bold rounded hover:bg-blue-600">
-                    Open Spreadsheet
-                    <svg class="inline-block w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                    </svg>
-                </a>
+<body>
+    <div class="layout-container">
+        <!-- Header -->
+        <header class="bg-white shadow-md p-4">
+            <div class="container mx-auto">
+                <!-- Sheet button row -->
+                <div class="mb-4 flex gap-2">
+                    <a id="viewSheetData" href="#" target="_blank" class="flex-1 px-4 py-2 bg-blue-500 text-white font-bold rounded hover:bg-blue-600 text-center text-sm md:text-base md:flex-none">
+                        Open Sheet
+                        <svg class="inline-block w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                        </svg>
+                    </a>
+                    <button id="downloadGeoJSON" class="flex-1 px-4 py-2 bg-green-500 text-white font-bold rounded hover:bg-green-600 text-sm md:text-base md:flex-none">
+                        Download GeoJSON
+                    </button>
+                </div>
+                <!-- Filters row -->
+                <div id="filterContainer" class="flex flex-nowrap items-center gap-2 overflow-x-auto pb-2">
+                    <!-- Filters will be dynamically added here -->
+                </div>
             </div>
-            <!-- Filters row -->
-            <div id="filterContainer" class="flex flex-wrap items-center gap-2">
-                <!-- Filters will be dynamically added here -->
-            </div>
-        </div>
-    </header>
+        </header>
 
-    <!-- Main content -->
-    <div class="container mx-auto flex">
-        <!-- Sidebar -->
-        <div id="sidebar" class="w-1/4 bg-white shadow-lg overflow-y-auto h-[calc(100vh-120px)]">
-            <!-- Content will be dynamically inserted here -->
-        </div>
-        <!-- Map container -->
-        <div class="w-3/4">
+        <!-- Main content -->
+        <div class="main-content">
+            <!-- Map container -->
             <div id="map">
                 <div id="center-marker">
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -94,8 +142,35 @@
                     </svg>
                 </div>
             </div>
+            <!-- Sidebar -->
+            <div id="sidebar" class="bg-white shadow-lg overflow-y-auto">
+                <div class="sidebar-handle"></div>
+                <!-- Content will be dynamically inserted here -->
+            </div>
         </div>
     </div>
+
+    <!-- Add this script before your other scripts -->
+    <script>
+        // Handle sidebar expansion on mobile
+        document.addEventListener('DOMContentLoaded', () => {
+            const sidebar = document.getElementById('sidebar');
+            const handle = document.querySelector('.sidebar-handle');
+
+            if (handle) {
+                handle.addEventListener('click', () => {
+                    sidebar.classList.toggle('expanded');
+                });
+            }
+
+            // Close sidebar when clicking on map (mobile only)
+            document.getElementById('map').addEventListener('click', () => {
+                if (window.innerWidth < 768) {
+                    sidebar.classList.remove('expanded');
+                }
+            });
+        });
+    </script>
 
     <!-- Add this before sheet-mapper.js -->
     <script src="sheet-to-geojson.js"></script>

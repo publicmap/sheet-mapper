@@ -23,7 +23,8 @@ class MapboxGLFilterPanel {
             layerId: null,
             numFields: 4,
             predefinedFilter: null,
-            visible: true,
+            headerVisible: true,
+            displayFields: null,
             ...options
         };
 
@@ -41,8 +42,11 @@ class MapboxGLFilterPanel {
             return;
         }
 
-        if (!this.options.visible) {
-            this.filterContainer.style.display = 'none';
+        if (!this.options.headerVisible) {
+            const header = document.querySelector('header');
+            if (header) {
+                header.style.display = 'none';
+            }
         }
 
         this.createFilters();
@@ -327,6 +331,10 @@ class MapboxGLFilterPanel {
     }
 
     createSidebarItemHTML(props, fields, circleRadius, circleColor, rotatedArrow, formattedDistance) {
+        // Get the fields to display
+        const displayFields = this.options.displayFields || fields;
+        const firstField = displayFields[0] || fields[0];  // Fallback to first available field if displayFields is empty
+
         let html = `
             <div class="flex justify-between items-start">
                 <div class="flex items-center gap-2">
@@ -340,7 +348,7 @@ class MapboxGLFilterPanel {
                             stroke-width="2"
                         />
                     </svg>
-                    <h4 class="text-lg">${props[fields[0]] || 'N/A'}</h4>
+                    <h4 class="text-lg">${props[firstField] || 'N/A'}</h4>
                 </div>
                 <span class="text-sm text-gray-600">
                     ${rotatedArrow} ${formattedDistance} away
@@ -348,9 +356,12 @@ class MapboxGLFilterPanel {
             </div>
         `;
 
-        // Add the next three fields dynamically
-        for (let i = 1; i < 4 && i < fields.length; i++) {
-            html += `<p>${fields[i]}: ${props[fields[i]] || 'N/A'}</p>`;
+        // Add the remaining display fields
+        const remainingFields = displayFields.slice(1);
+        for (const field of remainingFields) {
+            if (props.hasOwnProperty(field)) {
+                html += `<p>${field}: ${props[field] || 'N/A'}</p>`;
+            }
         }
 
         html += `
