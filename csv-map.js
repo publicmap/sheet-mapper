@@ -52,107 +52,67 @@ function setupDownloadButton(map) {
     }
 }
 
-// Update convertToGeoJSON to use global csv2geojson object
+// Update convertToGeoJSON to use Papa Parse
 async function convertToGeoJSON(data) {
     return new Promise((resolve, reject) => {
         // Add debug logging
         console.log('Total rows in data:', data.length);
         console.log('Raw data first row:', data[0]);
         
-        // Ensure Latitude and Longitude fields exist and check case sensitivity
-        const latField = Object.keys(data[0]).find(key => key.toLowerCase() === 'latitude');
-        const lngField = Object.keys(data[0]).find(key => key.toLowerCase() === 'longitude');
+        // Define possible coordinate field names
+        const latitudeFields = ['latitude', 'lat', 'y'];
+        const longitudeFields = ['longitude', 'lon', 'lng', 'x'];
+        
+        // Find matching field names (case-insensitive)
+        const latField = Object.keys(data[0]).find(key => 
+            latitudeFields.includes(key.toLowerCase())
+        );
+        const lngField = Object.keys(data[0]).find(key => 
+            longitudeFields.includes(key.toLowerCase())
+        );
         
         if (!latField || !lngField) {
-            reject(new Error(`Required fields not found. Looking for 'Latitude' and 'Longitude'. Found fields: ${Object.keys(data[0]).join(', ')}`));
+            reject(new Error(`Required coordinate fields not found. Looking for one of [${latitudeFields.join(', ')}] and one of [${longitudeFields.join(', ')}]. Found fields: ${Object.keys(data[0]).join(', ')}`));
             return;
         }
 
         console.log(`Using fields: ${latField} and ${lngField}`);
 
-        // Filter out rows without valid coordinates
-        const validData = data.filter((row, index) => {
-            // Check if the row has the required fields
-            if (!row[latField] || !row[lngField]) {
-                console.warn(`Row ${index} missing coordinate fields:`, row);
-                return false;
-            }
-
-            const lat = typeof row[latField] === 'string' ? parseFloat(row[latField]) : row[latField];
-            const lng = typeof row[lngField] === 'string' ? parseFloat(row[lngField]) : row[lngField];
-            
-            const isValid = !isNaN(lat) && !isNaN(lng) && 
-                          lat >= -90 && lat <= 90 && 
-                          lng >= -180 && lng <= 180;
-            
-            if (!isValid) {
-                console.warn(`Row ${index} has invalid coordinates:`, {
-                    rawLat: row[latField],
-                    rawLng: row[lngField],
-                    parsedLat: lat,
-                    parsedLng: lng,
-                    rowData: row
-                });
-            }
-            return isValid;
-        });
-
-        console.log(`Found ${validData.length} valid rows out of ${data.length} total rows`);
-
-        if (validData.length === 0) {
-            reject(new Error('No valid coordinates found in the data'));
-            return;
-        }
-
-        // Convert to CSV string with proper escaping
-        const headers = Object.keys(validData[0]).join(',');
-        const rows = validData.map(row => 
-            Object.values(row).map(val => {
-                if (val === null || val === undefined) return '';
-                if (typeof val === 'string') {
-                    // Escape quotes and wrap in quotes if contains comma or quote
-                    if (val.includes(',') || val.includes('"')) {
-                        return `"${val.replace(/"/g, '""')}"`;
-                    }
-                    return val;
-                }
-                return val.toString();
-            }).join(',')
-        );
-        const csvString = [headers, ...rows].join('\n');
-
-        // Use global csv2geojson object with the correct field names
-        window.csv2geojson.csv2geojson(csvString, {
-            latfield: latField,
-            lonfield: lngField,
-            delimiter: ','
-        }, (err, geojson) => {
-            if (err) {
-                console.error('csv2geojson error:', err);
-                reject(err);
-                return;
-            }
-
-            // Verify the conversion worked
-            if (!geojson || !geojson.features || geojson.features.length === 0) {
-                console.error('GeoJSON conversion produced no features');
-                reject(new Error('GeoJSON conversion failed'));
-                return;
-            }
-
-            console.log(`Successfully converted ${geojson.features.length} features`);
-
-            // Add row numbers to properties
-            geojson.features = geojson.features.map((feature, index) => ({
-                ...feature,
+        // Convert to GeoJSON
+        const features = data
+            .filter(row => {
+                const lat = parseFloat(row[latField]);
+                const lng = parseFloat(row[lngField]);
+                return !isNaN(lat) && !isNaN(lng) && 
+                       lat >= -90 && lat <= 90 && 
+                       lng >= -180 && lng <= 180;
+            })
+            .map((row, index) => ({
+                type: 'Feature',
+                geometry: {
+                    type: 'Point',
+                    coordinates: [
+                        parseFloat(row[lngField]),
+                        parseFloat(row[latField])
+                    ]
+                },
                 properties: {
-                    ...feature.properties,
+                    ...row,
                     row_number: index
                 }
             }));
 
-            resolve(geojson);
-        });
+        if (features.length === 0) {
+            reject(new Error('No valid coordinates found in the data'));
+            return;
+        }
+
+        const geojson = {
+            type: 'FeatureCollection',
+            features: features
+        };
+
+        resolve(geojson);
     });
 }
 
