@@ -116,9 +116,27 @@ async function convertToGeoJSON(data) {
     });
 }
 
-// Update initializeMap to use global Papa object
+// Add this near the top of the file, after the URL params section
+if (sheetId) {
+    // Wait for map to load before initializing with sheet data
+    map.on('load', () => {
+        console.log('Map loaded, initializing with sheetId:', sheetId);
+        initializeMap(sheetId, 
+            () => console.log('Sheet data loaded successfully'), 
+            (error) => console.error('Error loading sheet data:', error)
+        );
+    });
+}
+
+// Update initializeMap function to handle the UI state
 async function initializeMap(sheetId, onSuccess, onError) {
     try {
+        // Hide the sheet input UI immediately
+        const sheetInput = document.getElementById('sheetInput');
+        if (sheetInput) {
+            sheetInput.style.display = 'none';
+        }
+        
         console.log('Initializing map with sheetId:', sheetId);
         
         // Fetch CSV data from Google Sheets
@@ -142,7 +160,10 @@ async function initializeMap(sheetId, onSuccess, onError) {
         window.history.replaceState({}, '', currentUrl);
 
         // Show the buttons
-        document.getElementById('sheetButtons').style.display = 'flex';
+        const sheetButtons = document.getElementById('sheetButtons');
+        if (sheetButtons) {
+            sheetButtons.style.display = 'flex';
+        }
         
         // Update view sheet data button
         const viewSheetDataButton = document.getElementById('viewSheetData');
@@ -293,16 +314,27 @@ async function initializeMap(sheetId, onSuccess, onError) {
         
         checkSourceAndLayer();
 
-        // Fit the map to the data bounds
-        const bounds = new mapboxgl.LngLatBounds();
-        geojson.features.forEach(feature => {
-            bounds.extend(feature.geometry.coordinates);
-        });
-        map.fitBounds(bounds, { padding: 50 });
+        // Check if URL has a hash (indicating map position)
+        const hasMapPosition = window.location.hash.length > 0;
+
+        // Only fit bounds if there's no hash in the URL
+        if (!hasMapPosition) {
+            const bounds = new mapboxgl.LngLatBounds();
+            geojson.features.forEach(feature => {
+                bounds.extend(feature.geometry.coordinates);
+            });
+            map.fitBounds(bounds, { padding: 50 });
+        }
 
         // Call success callback
         if (onSuccess) onSuccess();
     } catch (error) {
+        // Show the sheet input UI again on error
+        const sheetInput = document.getElementById('sheetInput');
+        if (sheetInput) {
+            sheetInput.style.display = 'block';
+        }
+        
         console.error("Error loading sheet data:", error);
         if (onError) onError(error);
     }
@@ -429,7 +461,10 @@ window.addEventListener('loadCSVData', (event) => {
             }
 
             // Show the buttons
-            document.getElementById('sheetButtons').style.display = 'flex';
+            const sheetButtons = document.getElementById('sheetButtons');
+            if (sheetButtons) {
+                sheetButtons.style.display = 'flex';
+            }
 
             // Update the "Open Sheet" button to "Edit GeoJSON"
             const viewSheetData = document.getElementById('viewSheetData');
