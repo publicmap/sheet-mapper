@@ -29,9 +29,16 @@ let stateManager = null; // Initialize stateManager at the top level
 // Function to initialize map layers and events
 async function initializeMap(sheetId) {
     try {
+        console.log('Initializing map with sheetId:', sheetId); // Debug log
         const converter = new SheetToGeoJSON();
         const geojson = await converter.fromSheetId(sheetId);
         
+        // Update URL with sheetId parameter
+        const url = new URL(window.location);
+        url.searchParams.set('sheetId', sheetId);
+        console.log('Updating URL with:', url.toString()); // Debug log
+        window.history.replaceState({}, '', url);
+
         // Show the buttons
         document.getElementById('sheetButtons').style.display = 'flex';
         document.getElementById('sheetInput').style.display = 'none';
@@ -211,6 +218,7 @@ async function initializeMap(sheetId) {
 // Listen for the loadSheetData event
 window.addEventListener('loadSheetData', (event) => {
     const { sheetId } = event.detail;
+    console.log('Received loadSheetData event with sheetId:', sheetId); // Debug log
     initializeMap(sheetId);
 });
 
