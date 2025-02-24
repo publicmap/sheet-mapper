@@ -6,7 +6,6 @@ import MapboxGLFeatureStateManager from './mapbox-gl-feature-state-manager.js';
 mapboxgl.accessToken = config.mapboxgl.accessToken;
 // Replace the map initialization with the config object
 const map = new mapboxgl.Map(config.mapboxgl.map);
-
 // Add geocoder control
 const geocoder = new MapboxGeocoder({
     accessToken: mapboxgl.accessToken,
@@ -224,7 +223,8 @@ async function initializeMap(sheetId, onSuccess, onError) {
                     'yellow',
                     '#000000'
                 ],
-                'circle-color': 'rgba(0, 0, 0, 0)'
+                'circle-color': 'rgba(0, 0, 0, 0)',
+                'circle-emissive-strength': 1
             }
         });
 
@@ -246,7 +246,8 @@ async function initializeMap(sheetId, onSuccess, onError) {
                     ['get', 'circle-color'],
                     'grey'
                 ],
-                'circle-opacity': 1
+                'circle-opacity': 1,
+                'circle-emissive-strength': 1
             }
         });
 
@@ -417,7 +418,8 @@ window.addEventListener('loadCSVData', (event) => {
                             'yellow',
                             '#000000'
                         ],
-                        'circle-color': 'rgba(0, 0, 0, 0)'
+                        'circle-color': 'rgba(0, 0, 0, 0)',
+                        'circle-emissive-strength': 1
                     }
                 });
 
@@ -440,7 +442,8 @@ window.addEventListener('loadCSVData', (event) => {
                             ['get', 'circle-color'],
                             'grey'
                         ],
-                        'circle-opacity': 1
+                        'circle-opacity': 1,
+                        'circle-emissive-strength': 1
                     }
                 });
 
