@@ -26,6 +26,32 @@ const displayFields = urlParams.get('display_fields')?.split(',').map(f => f.tri
 
 let stateManager = null; // Initialize stateManager at the top level
 
+// Add this function near the top of the file
+function setupDownloadButton(map) {
+    const downloadGeoJSONButton = document.getElementById('downloadGeoJSON');
+    if (downloadGeoJSONButton) {
+        downloadGeoJSONButton.addEventListener('click', () => {
+            const source = map.getSource('sheet-data');
+            if (source) {
+                // Get the current data from the source
+                const currentData = source._data;
+                if (currentData) {
+                    const dataStr = JSON.stringify(currentData, null, 2);
+                    const blob = new Blob([dataStr], { type: 'application/json' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'map-data.geojson';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }
+            }
+        });
+    }
+}
+
 // Update convertToGeoJSON to use global csv2geojson object
 async function convertToGeoJSON(data) {
     return new Promise((resolve, reject) => {
@@ -270,25 +296,7 @@ async function initializeMap(sheetId, onSuccess, onError) {
             displayFields: null
         });
 
-        // Add download GeoJSON button functionality
-        const downloadGeoJSONButton = document.getElementById('downloadGeoJSON');
-        if (downloadGeoJSONButton) {
-            downloadGeoJSONButton.addEventListener('click', () => {
-                const source = map.getSource('sheet-data');
-                if (source && source._data) {
-                    const dataStr = JSON.stringify(source._data, null, 2);
-                    const blob = new Blob([dataStr], { type: 'application/json' });
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'map-data.geojson';
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                }
-            });
-        }
+        setupDownloadButton(map);  // Call the new function here
 
         // Initial sidebar update
         updateSidebar(geojson.features);
@@ -338,6 +346,166 @@ window.addEventListener('loadSheetData', (event) => {
     const { sheetId, onSuccess, onError } = event.detail;
     console.log('Received loadSheetData event with sheetId:', sheetId);
     initializeMap(sheetId, onSuccess, onError);
+});
+
+// Update the loadCSVData event listener
+window.addEventListener('loadCSVData', (event) => {
+    const { data, onSuccess, onError } = event.detail;
+    console.log('Received loadCSVData event with rows:', data.length);
+    
+    // Convert the CSV data directly to GeoJSON
+    convertToGeoJSON(data)
+        .then(geojson => {
+            // Add source and layers
+            if (map.getSource('sheet-data')) {
+                map.getSource('sheet-data').setData(geojson);
+            } else {
+                // Add source
+                map.addSource('sheet-data', {
+                    type: 'geojson',
+                    data: geojson,
+                    promoteId: 'row_number'
+                });
+
+                // Initialize the state manager
+                stateManager = new MapboxGLFeatureStateManager(map, 'sheet-data');
+
+                // Add hover line source if it doesn't exist
+                if (!map.getSource('hover-line')) {
+                    map.addSource('hover-line', {
+                        type: 'geojson',
+                        data: {
+                            type: 'FeatureCollection',
+                            features: []
+                        }
+                    });
+
+                    // Add hover line layer
+                    map.addLayer({
+                        id: 'hover-line',
+                        type: 'line',
+                        source: 'hover-line',
+                        paint: {
+                            'line-color': '#000',
+                            'line-width': 1,
+                            'line-dasharray': [2, 2]
+                        }
+                    });
+                }
+
+                // Add the circle stroke layer
+                map.addLayer({
+                    id: 'sheet-data-stroke',
+                    type: 'circle',
+                    source: 'sheet-data',
+                    paint: {
+                        'circle-radius': [
+                            'interpolate',
+                            ['linear'],
+                            ['zoom'],
+                            10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
+                            16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
+                        ],
+                        'circle-stroke-width': [
+                            'case',
+                            ['boolean', ['feature-state', 'hover'], false],
+                            10,
+                            1
+                        ],
+                        'circle-stroke-color': [
+                            'case',
+                            ['boolean', ['feature-state', 'hover'], false],
+                            'yellow',
+                            '#000000'
+                        ],
+                        'circle-color': 'rgba(0, 0, 0, 0)'
+                    }
+                });
+
+                // Add the main circle layer
+                map.addLayer({
+                    id: 'sheet-data',
+                    type: 'circle',
+                    source: 'sheet-data',
+                    paint: {
+                        'circle-radius': [
+                            'interpolate',
+                            ['linear'],
+                            ['zoom'],
+                            10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
+                            16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
+                        ],
+                        'circle-color': [
+                            'case',
+                            ['has', 'circle-color'],
+                            ['get', 'circle-color'],
+                            'grey'
+                        ],
+                        'circle-opacity': 1
+                    }
+                });
+
+                // Set up paint properties for the state manager
+                stateManager.updatePaintProperties('sheet-data-stroke', {
+                    hoverColor: 'yellow',
+                    selectedColor: 'blue',
+                    defaultColor: '#000000',
+                    hoverWidth: 10,
+                    selectedWidth: 12,
+                    defaultWidth: 1
+                });
+
+                setupDownloadButton(map);  // Add this line here
+
+                // Set up event listeners if they haven't been set up yet
+                setupEventListeners();
+            }
+
+            // Show the buttons
+            document.getElementById('sheetButtons').style.display = 'flex';
+
+            // Update the "Open Sheet" button to "Edit GeoJSON"
+            const viewSheetData = document.getElementById('viewSheetData');
+            viewSheetData.textContent = 'Edit GeoJSON';
+            viewSheetData.innerHTML = 'Edit GeoJSON <svg class="inline-block w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>';
+            
+            // Create geojson.io URL with data parameter
+            const geojsonString = JSON.stringify(geojson);
+            const encodedGeojson = encodeURIComponent(geojsonString);
+            viewSheetData.href = `https://geojson.io/#data=data:application/json,${encodedGeojson}`;
+
+            // Initialize or update filter panel
+            if (!window.filterPanel) {
+                window.filterPanel = new MapboxGLFilterPanel({
+                    geojson: geojson,
+                    containerId: 'filterContainer',
+                    sidebarId: 'sidebar',
+                    map: map,
+                    layerId: 'sheet-data',
+                    numFields: 4,
+                    visible: true,
+                    displayFields: null
+                });
+            } else {
+                window.filterPanel.updateData(geojson);
+            }
+
+            // Update sidebar
+            updateSidebar(geojson.features);
+
+            // Fit the map to the data bounds
+            const bounds = new mapboxgl.LngLatBounds();
+            geojson.features.forEach(feature => {
+                bounds.extend(feature.geometry.coordinates);
+            });
+            map.fitBounds(bounds, { padding: 50 });
+
+            if (onSuccess) onSuccess();
+        })
+        .catch(error => {
+            console.error("Error processing CSV data:", error);
+            if (onError) onError(error);
+        });
 });
 
 // Move event listeners inside a function that's called after layers are added

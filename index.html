@@ -117,6 +117,7 @@
             <div class="container mx-auto">
                 <!-- Initial sheet input state -->
                 <div id="sheetInput" class="mb-4">
+                    <div class="text-center mb-2 text-sm text-gray-600">Drop CSV anywhere on page or</div>
                     <div class="flex gap-2">
                         <input 
                             type="text" 
@@ -169,6 +170,75 @@
     <!-- Add this script before your other scripts -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // Add drag and drop handlers
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            // Handle file drop
+            document.body.addEventListener('drop', handleDrop, false);
+
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const file = dt.files[0];
+
+                if (file && file.type === 'text/csv') {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        const csvData = event.target.result;
+                        
+                        // Parse CSV using Papa Parse
+                        const parsedData = Papa.parse(csvData, {
+                            header: true,
+                            dynamicTyping: true,
+                            skipEmptyLines: true
+                        }).data;
+
+                        // Hide input and show loading state
+                        const sheetUrl = document.getElementById('sheetUrl');
+                        sheetUrl.disabled = true;
+                        sheetUrl.classList.add('bg-gray-100');
+                        sheetUrl.value = 'Processing CSV file...';
+
+                        // Trigger data loading with the parsed CSV
+                        window.dispatchEvent(new CustomEvent('loadCSVData', { 
+                            detail: { 
+                                data: parsedData,
+                                onError: (error) => {
+                                    // Reset input on error
+                                    sheetUrl.disabled = false;
+                                    sheetUrl.classList.remove('bg-gray-100');
+                                    sheetUrl.classList.add('text-red-500');
+                                    sheetUrl.value = `Error: ${error.message}`;
+                                    
+                                    // Reset error state after 3 seconds
+                                    setTimeout(() => {
+                                        sheetUrl.classList.remove('text-red-500');
+                                        sheetUrl.value = '';
+                                    }, 3000);
+                                },
+                                onSuccess: () => {
+                                    // Hide input and show buttons on success
+                                    document.getElementById('sheetInput').style.display = 'none';
+                                    document.getElementById('sheetButtons').style.display = 'flex';
+                                    
+                                    // Update download button text
+                                    document.getElementById('downloadGeoJSON').textContent = 'Download GeoJSON';
+                                }
+                            } 
+                        }));
+                    };
+                    reader.readAsText(file);
+                } else {
+                    alert('Please drop a CSV file');
+                }
+            }
+
             // Handle sidebar expansion on mobile
             const sidebar = document.getElementById('sidebar');
             const handle = document.querySelector('.sidebar-handle');
