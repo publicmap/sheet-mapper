@@ -121,12 +121,6 @@
                             placeholder="Paste Google Sheet URL here" 
                             class="flex-1 px-4 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
-                        <button 
-                            id="loadSheet" 
-                            class="px-4 py-2 bg-blue-500 text-white font-bold rounded hover:bg-blue-600 text-sm"
-                        >
-                            Load Sheet
-                        </button>
                     </div>
                 </div>
 
@@ -193,26 +187,52 @@
             const sheetInput = document.getElementById('sheetInput');
             const sheetButtons = document.getElementById('sheetButtons');
             const sheetUrl = document.getElementById('sheetUrl');
-            const loadSheet = document.getElementById('loadSheet');
 
-            loadSheet.addEventListener('click', () => {
-                const url = sheetUrl.value;
-                const sheetId = extractSheetId(url);
+            let loadingTimeout;
+
+            sheetUrl.addEventListener('input', (e) => {
+                clearTimeout(loadingTimeout);
                 
-                if (sheetId) {
-                    // Show the buttons and hide the input
-                    sheetInput.style.display = 'none';
-                    sheetButtons.style.display = 'flex';
+                loadingTimeout = setTimeout(() => {
+                    const url = e.target.value;
+                    const sheetId = extractSheetId(url);
                     
-                    // Update viewSheetData link
-                    const viewSheetData = document.getElementById('viewSheetData');
-                    viewSheetData.href = `https://docs.google.com/spreadsheets/d/${sheetId}`;
-                    
-                    // Trigger data loading (you'll need to implement this in your sheet-mapper.js)
-                    window.dispatchEvent(new CustomEvent('loadSheetData', { detail: { sheetId } }));
-                } else {
-                    alert('Invalid Google Sheet URL. Please check the URL and try again.');
-                }
+                    if (sheetId) {
+                        // Disable input and show loading state
+                        sheetUrl.disabled = true;
+                        sheetUrl.classList.add('bg-gray-100');
+                        sheetUrl.value = 'Loading sheet data...';
+                        
+                        // Update viewSheetData link
+                        const viewSheetData = document.getElementById('viewSheetData');
+                        viewSheetData.href = `https://docs.google.com/spreadsheets/d/${sheetId}`;
+                        
+                        // Trigger data loading
+                        window.dispatchEvent(new CustomEvent('loadSheetData', { 
+                            detail: { 
+                                sheetId,
+                                onError: (error) => {
+                                    // Reset input on error
+                                    sheetUrl.disabled = false;
+                                    sheetUrl.classList.remove('bg-gray-100');
+                                    sheetUrl.classList.add('text-red-500');
+                                    sheetUrl.value = `Error: ${error.message}`;
+                                    
+                                    // Reset error state after 3 seconds
+                                    setTimeout(() => {
+                                        sheetUrl.classList.remove('text-red-500');
+                                        sheetUrl.value = url;
+                                    }, 3000);
+                                },
+                                onSuccess: () => {
+                                    // Hide input and show buttons on success
+                                    sheetInput.style.display = 'none';
+                                    sheetButtons.style.display = 'flex';
+                                }
+                            } 
+                        }));
+                    }
+                }, 500); // Wait 500ms after typing stops
             });
 
             function extractSheetId(url) {
