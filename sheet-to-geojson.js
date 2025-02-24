@@ -29,20 +29,14 @@
  */
 
 class SheetToGeoJSON {
-    constructor(options = {}) {
-        this.options = {
-            requiredFields: ['Latitude', 'Longitude'],
-            ...options
-        };
+    constructor() {
+        this.data = null;
     }
 
     async fromSheetId(sheetId) {
-        if (!sheetId) {
-            throw new Error('No sheet ID provided');
-        }
-
-        const sheetUrl = `https://docs.google.com/spreadsheets/d/e/${sheetId}/pub?single=true&output=csv`;
-        return await this.fromUrl(sheetUrl);
+        // Construct the correct Google Sheets CSV export URL
+        const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+        return await this.fromUrl(url);
     }
 
     async fromUrl(url) {
@@ -50,122 +44,60 @@ class SheetToGeoJSON {
             Papa.parse(url, {
                 download: true,
                 header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
                 complete: (results) => {
                     try {
-                        const geojson = this.processData(results.data);
+                        const geojson = this.convert(results.data);
                         resolve(geojson);
                     } catch (error) {
                         reject(error);
                     }
                 },
-                error: (error) => reject(error)
+                error: (error) => {
+                    reject(error);
+                }
             });
         });
     }
 
-    processData(data) {
-        const validRows = [];
-        const invalidRows = [];
-        const fieldTypes = this.detectFieldTypes(data);
-
-        data.forEach((row, index) => {
-            const lon = parseFloat(row.Longitude);
+    convert(data) {
+        // Filter out rows without valid coordinates
+        const validData = data.filter(row => {
             const lat = parseFloat(row.Latitude);
-            
-            if (!isNaN(lon) && !isNaN(lat) && 
-                lon >= -180 && lon <= 180 && 
-                lat >= -90 && lat <= 90) {
-                
-                // Convert fields based on detected types
-                Object.keys(row).forEach(key => {
-                    row[key] = this.convertField(row[key], fieldTypes[key]);
-                });
-                
-                // Add row_number field (matching Google Sheet row numbers)
-                row.row_number = index + 2;
-                validRows.push(row);
-            } else {
-                invalidRows.push(row);
-            }
+            const lng = parseFloat(row.Longitude);
+            return !isNaN(lat) && !isNaN(lng) && 
+                   lat >= -90 && lat <= 90 && 
+                   lng >= -180 && lng <= 180;
         });
 
-        const geojson = {
-            type: 'FeatureCollection',
-            features: validRows.map(row => ({
+        // Convert to GeoJSON
+        const features = validData.map((row, index) => {
+            const lat = parseFloat(row.Latitude);
+            const lng = parseFloat(row.Longitude);
+
+            // Create a GeoJSON feature
+            return {
                 type: 'Feature',
                 geometry: {
                     type: 'Point',
-                    coordinates: [parseFloat(row.Longitude), parseFloat(row.Latitude)]
+                    coordinates: [lng, lat]
                 },
-                properties: row
-            })),
-            metadata: {
-                fieldTypes,
-                invalidRows,
-                totalRows: data.length,
-                validRows: validRows.length
-            }
+                properties: {
+                    ...row,
+                    row_number: index // Add row number as a unique identifier
+                }
+            };
+        });
+
+        return {
+            type: 'FeatureCollection',
+            features: features
         };
-
-        return geojson;
-    }
-
-    detectFieldTypes(data) {
-        const fieldTypes = {};
-        if (data.length > 0) {
-            Object.keys(data[0]).forEach(key => {
-                fieldTypes[key] = this.detectFieldType(data.map(row => row[key]));
-            });
-        }
-        return fieldTypes;
-    }
-
-    detectFieldType(values) {
-        const nonEmptyValues = values.filter(value => value !== null && value !== undefined && value !== '');
-        if (nonEmptyValues.length === 0) return 'string';
-
-        // Check if all values are strings that start with a number
-        const allStringsStartingWithNumber = nonEmptyValues.every(value => 
-            typeof value === 'string' && /^\d/.test(value)
-        );
-        if (allStringsStartingWithNumber) return 'string';
-
-        const allNumbers = nonEmptyValues.every(value => !isNaN(parseFloat(value)) && isFinite(value));
-        if (allNumbers) return 'number';
-
-        const allBooleans = nonEmptyValues.every(value => value.toLowerCase() === 'true' || value.toLowerCase() === 'false');
-        if (allBooleans) return 'boolean';
-
-        const allDates = nonEmptyValues.every(value => !isNaN(Date.parse(value)));
-        if (allDates) {
-            // Check if all values are actually dates and not just numbers
-            const allAreDates = nonEmptyValues.every(value => {
-                const date = new Date(value);
-                return date instanceof Date && !isNaN(date) && date.toISOString() !== new Date(0).toISOString();
-            });
-            if (allAreDates) return 'date';
-        }
-
-        return 'string';
-    }
-
-    convertField(value, type) {
-        switch (type) {
-            case 'number':
-                return parseFloat(value);
-            case 'boolean':
-                return value.toLowerCase() === 'true';
-            case 'date':
-                return new Date(value);
-            default:
-                return value;
-        }
     }
 }
 
-// Export for both browser and Node.js environments
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = SheetToGeoJSON;
-} else {
+// Export the class for browser usage
+if (typeof window !== 'undefined') {
     window.SheetToGeoJSON = SheetToGeoJSON;
 } 

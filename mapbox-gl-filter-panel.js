@@ -212,7 +212,6 @@ class MapboxGLFilterPanel {
     }
 
     updateSidebar(geojson) {
-        console.log('FilterPanel updateSidebar called with features:', geojson.features.length); // Debug log
         const sidebar = document.getElementById(this.options.sidebarId);
         if (!sidebar) {
             console.error('Sidebar element not found:', this.options.sidebarId);
@@ -302,7 +301,6 @@ class MapboxGLFilterPanel {
     }
 
     createSidebarItem(feature, origin) {
-        console.log('Creating sidebar item for feature:', feature.properties); // Debug log
         const props = feature.properties;
         const coords = feature.geometry.coordinates;
         

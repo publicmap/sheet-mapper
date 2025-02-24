@@ -112,8 +112,26 @@
         <!-- Header -->
         <header class="bg-white shadow-md p-4">
             <div class="container mx-auto">
-                <!-- Sheet button row -->
-                <div class="mb-4 flex gap-2">
+                <!-- Initial sheet input state -->
+                <div id="sheetInput" class="mb-4">
+                    <div class="flex gap-2">
+                        <input 
+                            type="text" 
+                            id="sheetUrl" 
+                            placeholder="Paste Google Sheet URL here" 
+                            class="flex-1 px-4 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                        <button 
+                            id="loadSheet" 
+                            class="px-4 py-2 bg-blue-500 text-white font-bold rounded hover:bg-blue-600 text-sm"
+                        >
+                            Load Sheet
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sheet buttons (initially hidden) -->
+                <div id="sheetButtons" class="mb-4 flex gap-2" style="display: none;">
                     <a id="viewSheetData" href="#" target="_blank" class="flex-1 px-4 py-2 bg-blue-500 text-white font-bold rounded hover:bg-blue-600 text-center text-sm md:text-base md:flex-none">
                         Open Sheet
                         <svg class="inline-block w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -124,6 +142,7 @@
                         Download GeoJSON
                     </button>
                 </div>
+
                 <!-- Filters row -->
                 <div id="filterContainer" class="flex flex-nowrap items-center gap-2 overflow-x-auto pb-2">
                     <!-- Filters will be dynamically added here -->
@@ -152,8 +171,8 @@
 
     <!-- Add this script before your other scripts -->
     <script>
-        // Handle sidebar expansion on mobile
         document.addEventListener('DOMContentLoaded', () => {
+            // Handle sidebar expansion on mobile
             const sidebar = document.getElementById('sidebar');
             const handle = document.querySelector('.sidebar-handle');
 
@@ -169,12 +188,55 @@
                     sidebar.classList.remove('expanded');
                 }
             });
+
+            // Sheet URL handling
+            const sheetInput = document.getElementById('sheetInput');
+            const sheetButtons = document.getElementById('sheetButtons');
+            const sheetUrl = document.getElementById('sheetUrl');
+            const loadSheet = document.getElementById('loadSheet');
+
+            loadSheet.addEventListener('click', () => {
+                const url = sheetUrl.value;
+                const sheetId = extractSheetId(url);
+                
+                if (sheetId) {
+                    // Show the buttons and hide the input
+                    sheetInput.style.display = 'none';
+                    sheetButtons.style.display = 'flex';
+                    
+                    // Update viewSheetData link
+                    const viewSheetData = document.getElementById('viewSheetData');
+                    viewSheetData.href = `https://docs.google.com/spreadsheets/d/${sheetId}`;
+                    
+                    // Trigger data loading (you'll need to implement this in your sheet-mapper.js)
+                    window.dispatchEvent(new CustomEvent('loadSheetData', { detail: { sheetId } }));
+                } else {
+                    alert('Invalid Google Sheet URL. Please check the URL and try again.');
+                }
+            });
+
+            function extractSheetId(url) {
+                // Extract sheet ID from various Google Sheets URL formats
+                const patterns = [
+                    /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/,
+                    /^([a-zA-Z0-9-_]+)$/
+                ];
+                
+                for (const pattern of patterns) {
+                    const match = url.match(pattern);
+                    if (match && match[1]) {
+                        return match[1];
+                    }
+                }
+                
+                return null;
+            }
         });
     </script>
 
     <!-- Add this before sheet-mapper.js -->
     <script src="sheet-to-geojson.js"></script>
-    <script src="mapbox-gl-filter-panel.js" type="module"></script>
-    <script src="sheet-mapper.js" type="module"></script>
+    <script type="module" src="mapbox-gl-filter-panel.js"></script>
+    <script type="module" src="sheet-mapper.js"></script>
 </body>
 </html>
