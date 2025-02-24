@@ -26,17 +26,134 @@ const displayFields = urlParams.get('display_fields')?.split(',').map(f => f.tri
 
 let stateManager = null; // Initialize stateManager at the top level
 
-// Function to initialize map layers and events
+// Update convertToGeoJSON to use global csv2geojson object
+async function convertToGeoJSON(data) {
+    return new Promise((resolve, reject) => {
+        // Add debug logging
+        console.log('Total rows in data:', data.length);
+        console.log('Raw data first row:', data[0]);
+        
+        // Ensure Latitude and Longitude fields exist and check case sensitivity
+        const latField = Object.keys(data[0]).find(key => key.toLowerCase() === 'latitude');
+        const lngField = Object.keys(data[0]).find(key => key.toLowerCase() === 'longitude');
+        
+        if (!latField || !lngField) {
+            reject(new Error(`Required fields not found. Looking for 'Latitude' and 'Longitude'. Found fields: ${Object.keys(data[0]).join(', ')}`));
+            return;
+        }
+
+        console.log(`Using fields: ${latField} and ${lngField}`);
+
+        // Filter out rows without valid coordinates
+        const validData = data.filter((row, index) => {
+            // Check if the row has the required fields
+            if (!row[latField] || !row[lngField]) {
+                console.warn(`Row ${index} missing coordinate fields:`, row);
+                return false;
+            }
+
+            const lat = typeof row[latField] === 'string' ? parseFloat(row[latField]) : row[latField];
+            const lng = typeof row[lngField] === 'string' ? parseFloat(row[lngField]) : row[lngField];
+            
+            const isValid = !isNaN(lat) && !isNaN(lng) && 
+                          lat >= -90 && lat <= 90 && 
+                          lng >= -180 && lng <= 180;
+            
+            if (!isValid) {
+                console.warn(`Row ${index} has invalid coordinates:`, {
+                    rawLat: row[latField],
+                    rawLng: row[lngField],
+                    parsedLat: lat,
+                    parsedLng: lng,
+                    rowData: row
+                });
+            }
+            return isValid;
+        });
+
+        console.log(`Found ${validData.length} valid rows out of ${data.length} total rows`);
+
+        if (validData.length === 0) {
+            reject(new Error('No valid coordinates found in the data'));
+            return;
+        }
+
+        // Convert to CSV string with proper escaping
+        const headers = Object.keys(validData[0]).join(',');
+        const rows = validData.map(row => 
+            Object.values(row).map(val => {
+                if (val === null || val === undefined) return '';
+                if (typeof val === 'string') {
+                    // Escape quotes and wrap in quotes if contains comma or quote
+                    if (val.includes(',') || val.includes('"')) {
+                        return `"${val.replace(/"/g, '""')}"`;
+                    }
+                    return val;
+                }
+                return val.toString();
+            }).join(',')
+        );
+        const csvString = [headers, ...rows].join('\n');
+
+        // Use global csv2geojson object with the correct field names
+        window.csv2geojson.csv2geojson(csvString, {
+            latfield: latField,
+            lonfield: lngField,
+            delimiter: ','
+        }, (err, geojson) => {
+            if (err) {
+                console.error('csv2geojson error:', err);
+                reject(err);
+                return;
+            }
+
+            // Verify the conversion worked
+            if (!geojson || !geojson.features || geojson.features.length === 0) {
+                console.error('GeoJSON conversion produced no features');
+                reject(new Error('GeoJSON conversion failed'));
+                return;
+            }
+
+            console.log(`Successfully converted ${geojson.features.length} features`);
+
+            // Add row numbers to properties
+            geojson.features = geojson.features.map((feature, index) => ({
+                ...feature,
+                properties: {
+                    ...feature.properties,
+                    row_number: index
+                }
+            }));
+
+            resolve(geojson);
+        });
+    });
+}
+
+// Update initializeMap to use global Papa object
 async function initializeMap(sheetId, onSuccess, onError) {
     try {
         console.log('Initializing map with sheetId:', sheetId);
-        const converter = new SheetToGeoJSON();
-        const geojson = await converter.fromSheetId(sheetId);
         
+        // Fetch CSV data from Google Sheets
+        const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+        const response = await fetch(csvUrl);
+        const csvText = await response.text();
+        
+        // Parse CSV to array of objects using global Papa object
+        const parsedData = window.Papa.parse(csvText, {
+            header: true,
+            dynamicTyping: true,
+            skipEmptyLines: true
+        }).data;
+
+        // Convert to GeoJSON
+        const geojson = await convertToGeoJSON(parsedData);
+
         // Update URL with sheetId parameter
-        const url = new URL(window.location);
-        url.searchParams.set('sheetId', sheetId);
-        window.history.replaceState({}, '', url);
+        const currentUrl = new URL(window.location);
+        currentUrl.searchParams.set('sheetId', sheetId);
+        window.history.replaceState({}, '', currentUrl);
 
         // Show the buttons
         document.getElementById('sheetButtons').style.display = 'flex';
