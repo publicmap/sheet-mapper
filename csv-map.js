@@ -22,6 +22,19 @@ const sheetId = urlParams.get('sheetId');
 const dataFilter = urlParams.get('data_filter');
 const showHeader = urlParams.get('show_header') !== 'false'; // Default to true if not specified
 const displayFields = urlParams.get('display_fields')?.split(',').map(f => f.trim()) || null;
+const boundaryDataUrl = urlParams.get('boundaryData');
+
+// Hide input UI immediately if we have valid parameters
+if (sheetId || boundaryDataUrl) {
+    const sheetInput = document.getElementById('sheetInput');
+    if (sheetInput) {
+        sheetInput.style.display = 'none';
+    }
+    const sheetButtons = document.getElementById('sheetButtons');
+    if (sheetButtons) {
+        sheetButtons.style.display = 'flex';
+    }
+}
 
 let stateManager = null; // Initialize stateManager at the top level
 
@@ -49,23 +62,65 @@ function setupDownloadButton(map) {
         });
     }
 
-    // Add toggle clusters button
+    // Update cluster toggle button
     const toggleClustersButton = document.createElement('button');
     toggleClustersButton.id = 'toggleClusters';
     toggleClustersButton.className = 'flex-1 px-4 py-2 bg-purple-500 text-white font-bold rounded hover:bg-purple-600 text-sm md:text-base md:flex-none';
-    toggleClustersButton.textContent = 'Toggle Clusters';
+    toggleClustersButton.textContent = 'Cluster Points';
     downloadGeoJSONButton.insertAdjacentElement('afterend', toggleClustersButton);
 
     let clustersVisible = false;
     toggleClustersButton.addEventListener('click', () => {
         clustersVisible = !clustersVisible;
         const visibility = clustersVisible ? 'visible' : 'none';
+        
+        // Toggle cluster point layers
         map.setLayoutProperty('clusters-fill', 'visibility', visibility);
         map.setLayoutProperty('clusters-stroke', 'visibility', visibility);
+        
+        // Toggle cluster hull layer
+        if (map.getLayer('cluster-hulls')) {
+            map.setLayoutProperty('cluster-hulls', 'visibility', visibility);
+        }
     });
 }
 
-// Update convertToGeoJSON to use Papa Parse
+function generateBrightColor() {
+    // Generate HSL color with:
+    // - Random hue (0-360)
+    // - High saturation (70-100%)
+    // - High lightness (45-65%)
+    const hue = Math.floor(Math.random() * 360);
+    const saturation = Math.floor(Math.random() * 30) + 70; // 70-100
+    const lightness = Math.floor(Math.random() * 20) + 45;  // 45-65
+    
+    // Convert HSL to hex
+    const h = hue / 360;
+    const s = saturation / 100;
+    const l = lightness / 100;
+
+    const hue2rgb = (p, q, t) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1/6) return p + (q - p) * 6 * t;
+        if (t < 1/2) return q;
+        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+        return p;
+    };
+
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const r = Math.round(hue2rgb(p, q, h + 1/3) * 255);
+    const g = Math.round(hue2rgb(p, q, h) * 255);
+    const b = Math.round(hue2rgb(p, q, h - 1/3) * 255);
+
+    return '#' + [r, g, b].map(x => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? '0' + hex : hex;
+    }).join('');
+}
+
+// Update convertToGeoJSON to fix color generation
 async function convertToGeoJSON(data) {
     return new Promise((resolve, reject) => {
         // Add debug logging
@@ -126,9 +181,9 @@ async function convertToGeoJSON(data) {
         };
 
         // Run DBSCAN clustering and add cluster info to properties
-        const clustered = turf.clustersDbscan(geojson, 20, { 
-            units: 'kilometers',
-            minPoints: 4 ,
+        const clustered = turf.clustersDbscan(geojson, 400, { 
+            units: 'meters',
+            minPoints: 10,
             mutate: true
         });
 
@@ -141,7 +196,7 @@ async function convertToGeoJSON(data) {
             const cluster = feature.properties.cluster;
             if (cluster !== undefined) {
                 if (!clusterColors[cluster]) {
-                    clusterColors[cluster] = `#${Math.floor(Math.random()*16777215).toString(16)}`;
+                    clusterColors[cluster] = generateBrightColor();
                 }
                 clusterSizes[cluster] = (clusterSizes[cluster] || 0) + 1;
             }
@@ -161,6 +216,48 @@ async function convertToGeoJSON(data) {
             };
         });
 
+        // After clustering is done, generate concave hulls for each cluster
+        const clusterHulls = [];
+        const clusterPoints = {};
+
+        // Group points by cluster
+        clustered.features.forEach(feature => {
+            const cluster = feature.properties.cluster;
+            if (cluster !== undefined && cluster !== 'noise') {
+                if (!clusterPoints[cluster]) {
+                    clusterPoints[cluster] = [];
+                }
+                clusterPoints[cluster].push(feature);
+            }
+        });
+
+        // Generate concave hull for each cluster
+        Object.entries(clusterPoints).forEach(([clusterId, points]) => {
+            if (points.length >= 3) { // Need at least 3 points for a polygon
+                const pointCollection = turf.featureCollection(points);
+                const hull = turf.concave(pointCollection, {
+                    maxEdge: 1, // 1 kilometer max edge length
+                    units: 'kilometers'
+                });
+                
+                if (hull) {
+                    hull.properties = {
+                        cluster_id: clusterId,
+                        cluster_color: clusterColors[clusterId]
+                    };
+                    clusterHulls.push(hull);
+                }
+            }
+        });
+
+        // Add cluster hulls to the response
+        geojson.properties = {
+            clusterHulls: {
+                type: 'FeatureCollection',
+                features: clusterHulls
+            }
+        };
+
         resolve(geojson);
     });
 }
@@ -177,7 +274,7 @@ if (sheetId) {
     });
 }
 
-// Update initializeMap function to handle the UI state
+// Update initializeMap function to handle existing sources
 async function initializeMap(sheetId, onSuccess, onError) {
     try {
         // Hide the sheet input UI immediately
@@ -208,6 +305,234 @@ async function initializeMap(sheetId, onSuccess, onError) {
         currentUrl.searchParams.set('sheetId', sheetId);
         window.history.replaceState({}, '', currentUrl);
 
+        // Initialize or update the source
+        if (map.getSource('sheet-data')) {
+            map.getSource('sheet-data').setData(geojson);
+        } else {
+            // Add source and layers
+            map.addSource('sheet-data', {
+                type: 'geojson',
+                data: geojson,
+                promoteId: 'row_number'
+            });
+
+            // Add hover line source
+            map.addSource('hover-line', {
+                type: 'geojson',
+                data: {
+                    type: 'FeatureCollection',
+                    features: []
+                }
+            });
+
+            // Add layers without depending on 'waterway-label'
+            map.addLayer({
+                id: 'hover-line',
+                type: 'line',
+                source: 'hover-line',
+                paint: {
+                    'line-color': '#000',
+                    'line-width': 1,
+                    'line-dasharray': [2, 2]
+                }
+            });
+
+            map.addLayer({
+                id: 'sheet-data-stroke',
+                type: 'circle',
+                source: 'sheet-data',
+                paint: {
+                    'circle-radius': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
+                        16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
+                    ],
+                    'circle-stroke-width': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        10,
+                        1
+                    ],
+                    'circle-stroke-color': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        'yellow',
+                        '#000000'
+                    ],
+                    'circle-color': 'rgba(0, 0, 0, 0)',
+                    'circle-emissive-strength': 1
+                }
+            });
+
+            map.addLayer({
+                id: 'sheet-data',
+                type: 'circle',
+                source: 'sheet-data',
+                paint: {
+                    'circle-radius': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
+                        16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
+                    ],
+                    'circle-color': [
+                        'case',
+                        ['has', 'circle-color'],
+                        ['get', 'circle-color'],
+                        'grey'
+                    ],
+                    'circle-opacity': 1,
+                    'circle-emissive-strength': 1
+                }
+            });
+
+            // Add transition for circle-stroke-width
+            map.setPaintProperty('sheet-data', 'circle-stroke-width-transition', {
+                duration: 1000,
+            });
+
+            // Initialize paint properties for the layer
+            stateManager = new MapboxGLFeatureStateManager(map, 'sheet-data');
+            stateManager.updatePaintProperties('sheet-data-stroke', {
+                hoverColor: 'yellow',
+                selectedColor: 'blue',
+                defaultColor: '#000000',
+                hoverWidth: 10,
+                selectedWidth: 12,
+                defaultWidth: 1
+            });
+
+            // Initialize filter panel
+            window.filterPanel = new MapboxGLFilterPanel({
+                geojson: geojson,
+                containerId: 'filterContainer',
+                sidebarId: 'sidebar',
+                map: map,
+                layerId: 'sheet-data',
+                numFields: 4,
+                visible: true,
+                displayFields: null
+            });
+
+            setupDownloadButton(map);  // Call the new function here
+
+            // Initial sidebar update
+            updateSidebar(geojson.features);
+
+            // Listen for filter changes
+            document.getElementById('filterContainer').addEventListener('filterchange', (event) => {
+                const filteredGeojson = event.detail.filteredGeojson;
+                const hasActiveFilters = Object.values(event.detail.filters).some(value => value !== '');
+                
+                if (!hasActiveFilters && !event.detail.useMapBounds) {
+                    // If no filters are active, use the original source data
+                    map.getSource('sheet-data').setData(geojson);
+                } else {
+                    // Update the source data with filtered GeoJSON
+                    map.getSource('sheet-data').setData(filteredGeojson);
+                }
+                
+                // Update sidebar with filtered data
+                updateSidebar(filteredGeojson.features);
+            });
+
+            // Update the checkSourceAndLayer function
+            const checkSourceAndLayer = () => {
+                if (map.getSource('sheet-data') && 
+                    map.getSource('sheet-data').loaded() && 
+                    map.getLayer('sheet-data') && 
+                    map.isStyleLoaded()) {
+                    // Initial sidebar update with all features
+                    updateSidebar(geojson.features);
+                } else {
+                    setTimeout(checkSourceAndLayer, 100);
+                }
+            };
+            
+            checkSourceAndLayer();
+
+            // Update this section to respect URL hash
+            const hasMapPosition = window.location.hash.length > 0;
+            if (!hasMapPosition) {
+                const bounds = new mapboxgl.LngLatBounds();
+                geojson.features.forEach(feature => {
+                    bounds.extend(feature.geometry.coordinates);
+                });
+                map.fitBounds(bounds, { padding: 50 });
+            }
+
+            // Add cluster layers using the same source but with cluster properties
+            map.addLayer({
+                id: 'clusters-stroke',
+                type: 'circle',
+                source: 'sheet-data', // Use the same source
+                layout: {
+                    'visibility': 'none'
+                },
+                paint: {
+                    'circle-radius': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 6],
+                        16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 6]]
+                    ],
+                    'circle-color': 'white',
+                    'circle-stroke-width': 2,
+                    'circle-stroke-color': ['get', 'cluster_color']
+                }
+            });
+
+            map.addLayer({
+                id: 'clusters-fill',
+                type: 'circle',
+                source: 'sheet-data', // Use the same source
+                layout: {
+                    'visibility': 'none'
+                },
+                paint: {
+                    'circle-radius': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 4],
+                        16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 4]]
+                    ],
+                    'circle-color': ['get', 'cluster_color'],
+                    'circle-opacity': 0.8,
+                    'circle-emissive-strength': 1
+                }
+            });
+
+            // After adding other layers, add the cluster hulls layer
+            if (!map.getLayer('cluster-hulls')) {
+                map.addSource('cluster-hulls', {
+                    type: 'geojson',
+                    data: geojson.properties.clusterHulls
+                });
+
+                map.addLayer({
+                    id: 'cluster-hulls',
+                    type: 'fill',
+                    source: 'cluster-hulls',
+                    layout: {
+                        'visibility': 'none'
+                    },
+                    paint: {
+                        'fill-color': ['get', 'cluster_color'],
+                        'fill-opacity': 0.2,
+                        'fill-outline-color': ['get', 'cluster_color'],
+                        'fill-emissive-strength': 1
+                    }
+                });
+            } else {
+                map.getSource('cluster-hulls').setData(geojson.properties.clusterHulls);
+            }
+        }
+
         // Show the buttons
         const sheetButtons = document.getElementById('sheetButtons');
         if (sheetButtons) {
@@ -218,209 +543,9 @@ async function initializeMap(sheetId, onSuccess, onError) {
         const viewSheetDataButton = document.getElementById('viewSheetData');
         viewSheetDataButton.href = `https://docs.google.com/spreadsheets/d/${sheetId}/pubhtml`;
 
-        // Initialize the state manager
-        stateManager = new MapboxGLFeatureStateManager(map, 'sheet-data');
-
-        // Add source and layers
-        map.addSource('sheet-data', {
-            type: 'geojson',
-            data: geojson,
-            promoteId: 'row_number'
-        });
-
-        // Add hover line source
-        map.addSource('hover-line', {
-            type: 'geojson',
-            data: {
-                type: 'FeatureCollection',
-                features: []
-            }
-        });
-
-        // Add layers without depending on 'waterway-label'
-        map.addLayer({
-            id: 'hover-line',
-            type: 'line',
-            source: 'hover-line',
-            paint: {
-                'line-color': '#000',
-                'line-width': 1,
-                'line-dasharray': [2, 2]
-            }
-        });
-
-        map.addLayer({
-            id: 'sheet-data-stroke',
-            type: 'circle',
-            source: 'sheet-data',
-            paint: {
-                'circle-radius': [
-                    'interpolate',
-                    ['linear'],
-                    ['zoom'],
-                    10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
-                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
-                ],
-                'circle-stroke-width': [
-                    'case',
-                    ['boolean', ['feature-state', 'hover'], false],
-                    10,
-                    1
-                ],
-                'circle-stroke-color': [
-                    'case',
-                    ['boolean', ['feature-state', 'hover'], false],
-                    'yellow',
-                    '#000000'
-                ],
-                'circle-color': 'rgba(0, 0, 0, 0)',
-                'circle-emissive-strength': 1
-            }
-        });
-
-        map.addLayer({
-            id: 'sheet-data',
-            type: 'circle',
-            source: 'sheet-data',
-            paint: {
-                'circle-radius': [
-                    'interpolate',
-                    ['linear'],
-                    ['zoom'],
-                    10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3],
-                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 3]]
-                ],
-                'circle-color': [
-                    'case',
-                    ['has', 'circle-color'],
-                    ['get', 'circle-color'],
-                    'grey'
-                ],
-                'circle-opacity': 1,
-                'circle-emissive-strength': 1
-            }
-        });
-
-        // Add transition for circle-stroke-width
-        map.setPaintProperty('sheet-data', 'circle-stroke-width-transition', {
-            duration: 1000,
-        });
-
-        // Initialize paint properties for the layer
-        stateManager.updatePaintProperties('sheet-data-stroke', {
-            hoverColor: 'yellow',
-            selectedColor: 'blue',
-            defaultColor: '#000000',
-            hoverWidth: 10,
-            selectedWidth: 12,
-            defaultWidth: 1
-        });
-
-        // Initialize filter panel
-        window.filterPanel = new MapboxGLFilterPanel({
-            geojson: geojson,
-            containerId: 'filterContainer',
-            sidebarId: 'sidebar',
-            map: map,
-            layerId: 'sheet-data',
-            numFields: 4,
-            visible: true,
-            displayFields: null
-        });
-
-        setupDownloadButton(map);  // Call the new function here
-
-        // Initial sidebar update
+        // Update sidebar
         updateSidebar(geojson.features);
 
-        // Listen for filter changes
-        document.getElementById('filterContainer').addEventListener('filterchange', (event) => {
-            const filteredGeojson = event.detail.filteredGeojson;
-            const hasActiveFilters = Object.values(event.detail.filters).some(value => value !== '');
-            
-            if (!hasActiveFilters && !event.detail.useMapBounds) {
-                // If no filters are active, use the original source data
-                map.getSource('sheet-data').setData(geojson);
-            } else {
-                // Update the source data with filtered GeoJSON
-                map.getSource('sheet-data').setData(filteredGeojson);
-            }
-            
-            // Update sidebar with filtered data
-            updateSidebar(filteredGeojson.features);
-        });
-
-        // Update the checkSourceAndLayer function
-        const checkSourceAndLayer = () => {
-            if (map.getSource('sheet-data') && 
-                map.getSource('sheet-data').loaded() && 
-                map.getLayer('sheet-data') && 
-                map.isStyleLoaded()) {
-                // Initial sidebar update with all features
-                updateSidebar(geojson.features);
-            } else {
-                setTimeout(checkSourceAndLayer, 100);
-            }
-        };
-        
-        checkSourceAndLayer();
-
-        // Check if URL has a hash (indicating map position)
-        const hasMapPosition = window.location.hash.length > 0;
-
-        // Only fit bounds if there's no hash in the URL
-        if (!hasMapPosition) {
-            const bounds = new mapboxgl.LngLatBounds();
-            geojson.features.forEach(feature => {
-                bounds.extend(feature.geometry.coordinates);
-            });
-            map.fitBounds(bounds, { padding: 50 });
-        }
-
-        // Add cluster layers using the same source but with cluster properties
-        map.addLayer({
-            id: 'clusters-stroke',
-            type: 'circle',
-            source: 'sheet-data', // Use the same source
-            layout: {
-                'visibility': 'none'
-            },
-            paint: {
-                'circle-radius': [
-                    'interpolate',
-                    ['linear'],
-                    ['zoom'],
-                    10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 6],
-                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 6]]
-                ],
-                'circle-color': 'white',
-                'circle-stroke-width': 2,
-                'circle-stroke-color': ['get', 'cluster_color']
-            }
-        });
-
-        map.addLayer({
-            id: 'clusters-fill',
-            type: 'circle',
-            source: 'sheet-data', // Use the same source
-            layout: {
-                'visibility': 'none'
-            },
-            paint: {
-                'circle-radius': [
-                    'interpolate',
-                    ['linear'],
-                    ['zoom'],
-                    10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 4],
-                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 4]]
-                ],
-                'circle-color': ['get', 'cluster_color'],
-                'circle-opacity': 0.8,
-                'circle-emissive-strength': 1
-            }
-        });
-
-        // Call success callback
         if (onSuccess) onSuccess();
     } catch (error) {
         // Show the sheet input UI again on error
@@ -591,13 +716,6 @@ window.addEventListener('loadCSVData', (event) => {
             // Update sidebar
             updateSidebar(geojson.features);
 
-            // Fit the map to the data bounds
-            const bounds = new mapboxgl.LngLatBounds();
-            geojson.features.forEach(feature => {
-                bounds.extend(feature.geometry.coordinates);
-            });
-            map.fitBounds(bounds, { padding: 50 });
-
             if (onSuccess) onSuccess();
         })
         .catch(error => {
@@ -700,6 +818,20 @@ function setupEventListeners() {
 // Call setupEventListeners after map loads
 map.on('load', () => {
     setupEventListeners();
+    
+    // Load boundary data if URL parameter is present
+    if (boundaryDataUrl) {
+        loadBoundaryData(boundaryDataUrl);
+    }
+
+    // Existing sheetId handling
+    if (sheetId) {
+        console.log('Map loaded, initializing with sheetId:', sheetId);
+        initializeMap(sheetId, 
+            () => console.log('Sheet data loaded successfully'), 
+            (error) => console.error('Error loading sheet data:', error)
+        );
+    }
 });
 
 // Helper function to get directional arrow
@@ -742,4 +874,81 @@ map.on('moveend', () => {
 
 map.on('mouseleave', 'sheet-data', () => {
     stateManager.setHovered(null);
-}); 
+});
+
+// Add function to load boundary data
+async function loadBoundaryData(url) {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        
+        // Hide the sheet input UI immediately when boundary data loads successfully
+        const sheetInput = document.getElementById('sheetInput');
+        if (sheetInput) {
+            sheetInput.style.display = 'none';
+        }
+        
+        // Show the buttons
+        const sheetButtons = document.getElementById('sheetButtons');
+        if (sheetButtons) {
+            sheetButtons.style.display = 'flex';
+        }
+
+        // Add source if it doesn't exist
+        if (!map.getSource('boundary-data')) {
+            map.addSource('boundary-data', {
+                type: 'geojson',
+                data: data
+            });
+
+            // Add fill layer
+            map.addLayer({
+                'id': 'boundary-fill',
+                'type': 'fill',
+                'source': 'boundary-data',
+                'paint': {
+                    'fill-color': '#088',
+                    'fill-opacity': 0.2
+                }
+            });
+
+            // Add line layer
+            map.addLayer({
+                'id': 'boundary-line',
+                'type': 'line',
+                'source': 'boundary-data',
+                'paint': {
+                    'line-color': '#088',
+                    'line-width': 2
+                }
+            });
+        } else {
+            // Update existing source
+            map.getSource('boundary-data').setData(data);
+        }
+
+        // Remove the bounds fitting code here since it's causing the auto-pan
+        // The map position should be controlled by the URL hash
+        const hasMapPosition = window.location.hash.length > 0;
+        if (!hasMapPosition) {
+            const bounds = new mapboxgl.LngLatBounds();
+            if (data.type === 'FeatureCollection') {
+                data.features.forEach(feature => {
+                    if (feature.geometry) {
+                        const coords = feature.geometry.type === 'Point' 
+                            ? [feature.geometry.coordinates] 
+                            : feature.geometry.coordinates.flat(2);
+                        coords.forEach(coord => bounds.extend(coord));
+                    }
+                });
+            }
+            map.fitBounds(bounds, { padding: 50 });
+        }
+
+    } catch (error) {
+        console.error('Error loading boundary data:', error);
+    }
+} 
