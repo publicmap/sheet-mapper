@@ -192,6 +192,21 @@ class MapboxGLFilterPanel {
         // Update the map source
         this.options.map.getSource('sheet-data').setData(filteredGeojson);
 
+        // Fit map to filtered features if there are any
+        if (filteredFeatures.length > 0) {
+            const bounds = new mapboxgl.LngLatBounds();
+            
+            filteredFeatures.forEach(feature => {
+                bounds.extend(feature.geometry.coordinates);
+            });
+            
+            this.options.map.fitBounds(bounds, {
+                padding: 50,
+                maxZoom: 15,  // Prevent zooming in too close
+                duration: 1000 // Smooth animation duration in milliseconds
+            });
+        }
+
         // Update the sidebar if sidebarId is provided
         if (this.options.sidebarId) {
             this.updateSidebar(filteredGeojson);
