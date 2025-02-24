@@ -167,7 +167,7 @@ async function initializeMap(sheetId, onSuccess, onError) {
             }
         });
 
-        // Add layers
+        // Add layers without depending on 'waterway-label'
         map.addLayer({
             id: 'hover-line',
             type: 'line',
@@ -205,7 +205,7 @@ async function initializeMap(sheetId, onSuccess, onError) {
                 ],
                 'circle-color': 'rgba(0, 0, 0, 0)'
             }
-        }, 'waterway-label');
+        });
 
         map.addLayer({
             id: 'sheet-data',
@@ -227,7 +227,7 @@ async function initializeMap(sheetId, onSuccess, onError) {
                 ],
                 'circle-opacity': 1
             }
-        }, 'waterway-label');
+        });
 
         // Add transition for circle-stroke-width
         map.setPaintProperty('sheet-data', 'circle-stroke-width-transition', {
@@ -292,6 +292,13 @@ async function initializeMap(sheetId, onSuccess, onError) {
         };
         
         checkSourceAndLayer();
+
+        // Fit the map to the data bounds
+        const bounds = new mapboxgl.LngLatBounds();
+        geojson.features.forEach(feature => {
+            bounds.extend(feature.geometry.coordinates);
+        });
+        map.fitBounds(bounds, { padding: 50 });
 
         // Call success callback
         if (onSuccess) onSuccess();
