@@ -32,7 +32,6 @@ function setupDownloadButton(map) {
         downloadGeoJSONButton.addEventListener('click', () => {
             const source = map.getSource('sheet-data');
             if (source) {
-                // Get the current data from the source
                 const currentData = source._data;
                 if (currentData) {
                     const dataStr = JSON.stringify(currentData, null, 2);
@@ -49,6 +48,21 @@ function setupDownloadButton(map) {
             }
         });
     }
+
+    // Add toggle clusters button
+    const toggleClustersButton = document.createElement('button');
+    toggleClustersButton.id = 'toggleClusters';
+    toggleClustersButton.className = 'flex-1 px-4 py-2 bg-purple-500 text-white font-bold rounded hover:bg-purple-600 text-sm md:text-base md:flex-none';
+    toggleClustersButton.textContent = 'Toggle Clusters';
+    downloadGeoJSONButton.insertAdjacentElement('afterend', toggleClustersButton);
+
+    let clustersVisible = false;
+    toggleClustersButton.addEventListener('click', () => {
+        clustersVisible = !clustersVisible;
+        const visibility = clustersVisible ? 'visible' : 'none';
+        map.setLayoutProperty('clusters-fill', 'visibility', visibility);
+        map.setLayoutProperty('clusters-stroke', 'visibility', visibility);
+    });
 }
 
 // Update convertToGeoJSON to use Papa Parse
@@ -110,6 +124,42 @@ async function convertToGeoJSON(data) {
             type: 'FeatureCollection',
             features: features
         };
+
+        // Run DBSCAN clustering and add cluster info to properties
+        const clustered = turf.clustersDbscan(geojson, 20, { 
+            units: 'kilometers',
+            minPoints: 4 ,
+            mutate: true
+        });
+
+        // Generate random colors for each cluster
+        const clusterColors = {};
+        const clusterSizes = {};
+        
+        // First pass: count cluster sizes and generate colors
+        clustered.features.forEach(feature => {
+            const cluster = feature.properties.cluster;
+            if (cluster !== undefined) {
+                if (!clusterColors[cluster]) {
+                    clusterColors[cluster] = `#${Math.floor(Math.random()*16777215).toString(16)}`;
+                }
+                clusterSizes[cluster] = (clusterSizes[cluster] || 0) + 1;
+            }
+        });
+
+        // Second pass: add cluster info to properties
+        geojson.features = clustered.features.map(feature => {
+            const cluster = feature.properties.cluster;
+            return {
+                ...feature,
+                properties: {
+                    ...feature.properties,
+                    cluster_id: cluster !== undefined ? cluster : 'noise',
+                    cluster_size: cluster !== undefined ? clusterSizes[cluster] : 1,
+                    cluster_color: cluster !== undefined ? clusterColors[cluster] : '#666666'
+                }
+            };
+        });
 
         resolve(geojson);
     });
@@ -326,6 +376,49 @@ async function initializeMap(sheetId, onSuccess, onError) {
             });
             map.fitBounds(bounds, { padding: 50 });
         }
+
+        // Add cluster layers using the same source but with cluster properties
+        map.addLayer({
+            id: 'clusters-stroke',
+            type: 'circle',
+            source: 'sheet-data', // Use the same source
+            layout: {
+                'visibility': 'none'
+            },
+            paint: {
+                'circle-radius': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 6],
+                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 6]]
+                ],
+                'circle-color': 'white',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': ['get', 'cluster_color']
+            }
+        });
+
+        map.addLayer({
+            id: 'clusters-fill',
+            type: 'circle',
+            source: 'sheet-data', // Use the same source
+            layout: {
+                'visibility': 'none'
+            },
+            paint: {
+                'circle-radius': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    10, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 4],
+                    16, ['*', 2, ['case', ['has', 'circle-radius'], ['to-number', ['get', 'circle-radius']], 4]]
+                ],
+                'circle-color': ['get', 'cluster_color'],
+                'circle-opacity': 0.8,
+                'circle-emissive-strength': 1
+            }
+        });
 
         // Call success callback
         if (onSuccess) onSuccess();

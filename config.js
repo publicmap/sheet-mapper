@@ -14,6 +14,7 @@ export const config = {
                         "id": "basemap",
                         "url": "mapbox://styles/mapbox/standard",
                         "config": {
+                            "theme": "monochrome",
                             "lightPreset": "dusk",
                         }
                     }
